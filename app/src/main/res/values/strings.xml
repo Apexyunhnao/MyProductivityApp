@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">煤气站配送管理</string>
+    <string name="employee_management">员工管理</string>
+    <string name="delivery_record">配送记录</string>
+    <string name="price_settings">价格设置</string>
+    <string name="statistics">统计报表</string>
+    <string name="add_employee">添加员工</string>
+    <string name="add_record">添加记录</string>
+    <string name="employee_name">员工姓名</string>
+    <string name="employee_id">员工编号</string>
+    <string name="phone_number">联系电话</string>
+    <string name="heavy_bottle">重瓶</string>
+    <string name="rental_bottle">租瓶</string>
+    <string name="exchange_bottle">换瓶</string>
+    <string name="new_bottle">新瓶</string>
+    <string name="quantity">数量</string>
+    <string name="price">单价</string>
+    <string name="total_amount">总金额</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+    <string name="edit">编辑</string>
+    <string name="confirm">确认</string>
+    <string name="date">日期</string>
+    <string name="export">导出</string>
+</resources>

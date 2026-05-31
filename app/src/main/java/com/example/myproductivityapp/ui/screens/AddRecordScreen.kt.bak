@@ -1,0 +1,836 @@
+// 包名：定义这个文件属于哪个包
+package com.example.myproductivityapp.ui.screens
+
+// 导入Android相机权限相关的类
+import android.Manifest
+import android.net.Uri
+// 导入用于启动相机和请求权限的工具
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+// 导入Compose UI组件
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+// 导入文件提供者，用于安全地分享文件给相机应用
+import androidx.core.content.FileProvider
+// 导入导航控制器，用于页面跳转
+import androidx.navigation.NavHostController
+// 导入Coil图片加载库
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
+// 导入数据库和数据模型
+import com.example.myproductivityapp.data.AppDatabase
+import com.example.myproductivityapp.data.model.BottleType
+import com.example.myproductivityapp.data.model.BottleYear
+import com.example.myproductivityapp.data.model.DeliveryRecord
+import com.example.myproductivityapp.data.model.Employee
+// 导入协程，用于异步操作
+import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
+
+/**
+ * 煤气瓶类型项数据类
+ * 用于存储每种煤气瓶类型的输入信息
+ * @param type 煤气瓶类型（重瓶、租瓶、对瓶、新瓶、小瓶）
+ * @param quantity 数量（字符串形式，方便输入）
+ * @param price 单价（字符串形式，方便输入）
+ * @param yearSelections 年份选择（例如：22厂、26检等）
+ * @param customerName 客户名称（仅租瓶需要）
+ */
+data class BottleTypeItem(
+    val type: BottleType,
+    val quantity: String,
+    val price: String,
+    val yearSelections: Map<String, String> = emptyMap(),
+    val customerName: String = ""
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddRecordScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val database = remember { AppDatabase.getDatabase(context) }
+    val scope = rememberCoroutineScope()
+
+    var employees by remember { mutableStateOf<List<Employee>>(emptyList()) }
+    var selectedEmployee by remember { mutableStateOf<Employee?>(null) }
+    var expandedEmployee by remember { mutableStateOf(false) }
+
+    var selectedTypes by remember { mutableStateOf(setOf<BottleType>()) }
+    var bottleItems by remember { mutableStateOf(mapOf<BottleType, BottleTypeItem>()) }
+    var availableYears by remember { mutableStateOf<List<BottleYear>>(emptyList()) }
+
+    var totalAmount by remember { mutableStateOf(0.0) }
+    var cashAmount by remember { mutableStateOf("") }
+    var wechatAmount by remember { mutableStateOf(0.0) }
+    var debtAmount by remember { mutableStateOf(0.0) }
+    var notes by remember { mutableStateOf("") }
+    var capturedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var photoFile by remember { mutableStateOf<File?>(null) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
+    var imageRefreshTrigger by remember { mutableStateOf(0) } // 用于强制刷新图片显示
+
+    // 先定义相机启动器
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            // 图片拍摄成功，触发界面刷新
+            imageRefreshTrigger++
+        } else {
+            // 拍摄失败，清理文件
+            photoFile?.delete()
+            photoFile = null
+            capturedImageUri = null
+        }
+    }
+
+    // 后定义权限启动器
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val storageDir = File(context.filesDir, "delivery_images")
+            if (!storageDir.exists()) {
+                storageDir.mkdirs()
+            }
+            val file = File(storageDir, "IMG_${timeStamp}.jpg")
+            photoFile = file
+
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            capturedImageUri = uri
+            cameraLauncher.launch(uri)
+        } else {
+            showPermissionDialog = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        database.employeeDao().getAllEmployees().collect { employeeList ->
+            employees = employeeList
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        database.bottleYearDao().getAllYears().collect { years ->
+            availableYears = years
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        scope.launch {
+            val priceConfig = database.priceConfigDao().getPriceByType(BottleType.HEAVY.name)
+            val heavyItem = BottleTypeItem(
+                type = BottleType.HEAVY,
+                quantity = "",
+                price = priceConfig?.price?.toString() ?: "0"
+            )
+            bottleItems = mapOf(BottleType.HEAVY to heavyItem)
+        }
+    }
+
+    LaunchedEffect(selectedTypes) {
+        scope.launch {
+            val newItems = mutableMapOf<BottleType, BottleTypeItem>()
+            newItems[BottleType.HEAVY] = bottleItems[BottleType.HEAVY] ?: BottleTypeItem(
+                type = BottleType.HEAVY,
+                quantity = "",
+                price = "0"
+            )
+
+            selectedTypes.forEach { type ->
+                if (type != BottleType.HEAVY) {
+                    val existingItem = bottleItems[type]
+                    if (existingItem != null) {
+                        newItems[type] = existingItem
+                    } else {
+                        val priceConfig = database.priceConfigDao().getPriceByType(type.name)
+                        newItems[type] = BottleTypeItem(
+                            type = type,
+                            quantity = "",
+                            price = priceConfig?.price?.toString() ?: "0"
+                        )
+                    }
+                }
+            }
+            bottleItems = newItems
+        }
+    }
+
+    LaunchedEffect(bottleItems) {
+        var total = 0.0
+        bottleItems.values.forEach { item ->
+            // 对瓶不计算金额
+            if (item.type != BottleType.EXCHANGE) {
+                val qty = item.quantity.toDoubleOrNull() ?: 0.0
+                val price = item.price.toDoubleOrNull() ?: 0.0
+                total += qty * price
+            }
+        }
+        totalAmount = total
+    }
+
+    LaunchedEffect(totalAmount, cashAmount) {
+        val cash = cashAmount.toDoubleOrNull() ?: 0.0
+        val remaining = totalAmount - cash
+        if (remaining >= 0) {
+            wechatAmount = remaining
+            debtAmount = 0.0
+        } else {
+            wechatAmount = 0.0
+            debtAmount = -remaining
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = "添加配送记录",
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        ExposedDropdownMenuBox(
+            expanded = expandedEmployee,
+            onExpandedChange = { expandedEmployee = it }
+        ) {
+            OutlinedTextField(
+                value = selectedEmployee?.name ?: "请选择员工",
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("选择员工") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedEmployee) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor()
+            )
+            ExposedDropdownMenu(
+                expanded = expandedEmployee,
+                onDismissRequest = { expandedEmployee = false }
+            ) {
+                employees.forEach { employee ->
+                    DropdownMenuItem(
+                        text = { Text(employee.name) },
+                        onClick = {
+                            selectedEmployee = employee
+                            expandedEmployee = false
+                        }
+                    )
+                }
+            }
+        }
+
+        HeavyBottleCard(
+            item = bottleItems[BottleType.HEAVY],
+            onQuantityChange = { newQty ->
+                bottleItems[BottleType.HEAVY]?.let { item ->
+                    bottleItems = bottleItems + (BottleType.HEAVY to item.copy(quantity = newQty))
+                }
+            },
+            onPriceChange = { newPrice ->
+                bottleItems[BottleType.HEAVY]?.let { item ->
+                    bottleItems = bottleItems + (BottleType.HEAVY to item.copy(price = newPrice))
+                }
+            }
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "其他类型",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                listOf(BottleType.RENTAL, BottleType.EXCHANGE, BottleType.NEW, BottleType.SMALL).forEach { type ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = type.displayName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Checkbox(
+                            checked = selectedTypes.contains(type),
+                            onCheckedChange = { checked ->
+                                selectedTypes = if (checked) {
+                                    selectedTypes + type
+                                } else {
+                                    selectedTypes - type
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        selectedTypes.forEach { type ->
+            val item = bottleItems[type]
+            if (item != null) {
+                BottleTypeCard(
+                    item = item,
+                    availableYears = availableYears,
+                    onQuantityChange = { newQty ->
+                        bottleItems = bottleItems + (type to item.copy(quantity = newQty))
+                    },
+                    onPriceChange = { newPrice ->
+                        bottleItems = bottleItems + (type to item.copy(price = newPrice))
+                    },
+                    onYearChange = { yearKey, qty ->
+                        val newYearSelections = item.yearSelections.toMutableMap()
+                        if (qty.isBlank() || qty.toIntOrNull() == 0) {
+                            newYearSelections.remove(yearKey)
+                        } else {
+                            newYearSelections[yearKey] = qty
+                        }
+                        val totalQty = newYearSelections.values.sumOf { it.toIntOrNull() ?: 0 }
+                        bottleItems = bottleItems + (type to item.copy(
+                            yearSelections = newYearSelections,
+                            quantity = totalQty.toString()
+                        ))
+                    },
+                    onCustomerChange = { newCustomer ->
+                        bottleItems = bottleItems + (type to item.copy(customerName = newCustomer))
+                    }
+                )
+            }
+        }
+
+        PaymentCard(
+            totalAmount = totalAmount,
+            cashAmount = cashAmount,
+            wechatAmount = wechatAmount,
+            debtAmount = debtAmount,
+            onCashAmountChange = { cashAmount = it }
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "拍摄图片 (可选)",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 检查是否有拍摄的图片，如果有就显示图片和删除按钮
+                if (capturedImageUri != null && photoFile != null && photoFile!!.exists()) {
+                    // 使用 key 参数强制刷新图片显示
+                    key(imageRefreshTrigger) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                        ) {
+                            Image(
+                                painter = rememberAsyncImagePainter(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(photoFile)
+                                        .memoryCacheKey("delivery_photo_${imageRefreshTrigger}")
+                                        .build()
+                                ),
+                                contentDescription = "已拍摄图片",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                            IconButton(
+                                onClick = {
+                                    photoFile?.delete()
+                                    photoFile = null
+                                    capturedImageUri = null
+                                },
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "删除图片",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "拍照")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("拍摄图片", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = notes,
+            onValueChange = { notes = it },
+            label = { Text("备注 (可选)") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 5
+        )
+
+        Button(
+            onClick = {
+                if (selectedEmployee != null) {
+                    scope.launch {
+                        val bottleDetails = mutableListOf<String>()
+                        var totalQty = 0
+                        var totalPrice = 0.0
+
+                        bottleItems.forEach { (type, item) ->
+                            val qty = item.quantity.toIntOrNull()
+                            val price = item.price.toDoubleOrNull()
+
+                            if (type == BottleType.EXCHANGE) {
+                                if (qty != null && qty > 0) {
+                                    totalQty += qty
+                                    val typeDetail = buildString {
+                                        append("${type.displayName}: ${qty}瓶")
+                                        if (item.yearSelections.isNotEmpty()) {
+                                            append(" (${item.yearSelections.entries.joinToString(" ") { "${it.key}:${it.value}个" }})")
+                                        }
+                                    }
+                                    bottleDetails.add(typeDetail)
+                                }
+                            } else if (qty != null && qty > 0 && price != null) {
+                                totalQty += qty
+                                totalPrice += qty * price
+
+                                val typeDetail = buildString {
+                                    val amount = qty * price
+                                    append("${type.displayName}: ${qty}瓶 × ¥${String.format("%.2f", price)} = ¥${String.format("%.2f", amount)}")
+                                    if (type == BottleType.RENTAL) {
+                                        if (item.yearSelections.isNotEmpty()) {
+                                            append(" (${item.yearSelections.entries.joinToString(" ") { "${it.key}:${it.value}个" }})")
+                                        }
+                                    }
+                                    if (type == BottleType.RENTAL && item.customerName.isNotBlank()) {
+                                        append(" [对象: ${item.customerName}]")
+                                    }
+                                }
+                                bottleDetails.add(typeDetail)
+                            }
+                        }
+
+                        if (bottleDetails.isNotEmpty()) {
+                            val cash = cashAmount.toDoubleOrNull() ?: 0.0
+                            val detailedNotes = buildString {
+                                append(bottleDetails.joinToString(" | "))
+                                if (notes.isNotBlank()) {
+                                    append(" | 备注: $notes")
+                                }
+                            }
+
+                            val imagePath = photoFile?.absolutePath ?: ""
+
+                            val record = DeliveryRecord(
+                                employeeId = selectedEmployee!!.id,
+                                employeeName = selectedEmployee!!.name,
+                                bottleType = "MIXED",
+                                quantity = totalQty,
+                                pricePerUnit = if (totalQty > 0) totalPrice / totalQty else 0.0,
+                                totalAmount = totalPrice,
+                                cashAmount = cash,
+                                wechatAmount = wechatAmount,
+                                debtAmount = debtAmount,
+                                yearInfo = "",
+                                date = System.currentTimeMillis(),
+                                notes = detailedNotes,
+                                imagePath = imagePath
+                            )
+                            database.deliveryRecordDao().insertRecord(record)
+                        }
+
+                        selectedTypes = setOf()
+                        bottleItems = mapOf(BottleType.HEAVY to BottleTypeItem(
+                            type = BottleType.HEAVY,
+                            quantity = "",
+                            price = bottleItems[BottleType.HEAVY]?.price ?: "0"
+                        ))
+                        cashAmount = ""
+                        notes = ""
+                        capturedImageUri = null
+                        photoFile = null
+
+                        navController.navigate("statistics")
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = selectedEmployee != null &&
+                    bottleItems.values.any { it.quantity.toIntOrNull() != null && it.quantity.toInt() > 0 }
+        ) {
+            Text("保存记录", style = MaterialTheme.typography.headlineMedium)
+        }
+    }
+
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = { Text("需要相机权限") },
+            text = { Text("拍摄图片需要相机权限，请在设置中授予相机权限。") },
+            confirmButton = {
+                TextButton(onClick = { showPermissionDialog = false }) {
+                    Text("确定")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun HeavyBottleCard(
+    item: BottleTypeItem?,
+    onQuantityChange: (String) -> Unit,
+    onPriceChange: (String) -> Unit
+) {
+    if (item == null) return
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${item.type.displayName} ",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "¥${String.format("%.2f", (item.quantity.toDoubleOrNull() ?: 0.0) * (item.price.toDoubleOrNull() ?: 0.0))}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = item.quantity,
+                    onValueChange = onQuantityChange,
+                    label = { Text("数量", style = MaterialTheme.typography.titleMedium) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.headlineSmall
+                )
+                OutlinedTextField(
+                    value = item.price,
+                    onValueChange = onPriceChange,
+                    label = { Text("单价 (元)", style = MaterialTheme.typography.titleMedium) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.headlineSmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BottleTypeCard(
+    item: BottleTypeItem,
+    availableYears: List<BottleYear>,
+    onQuantityChange: (String) -> Unit,
+    onPriceChange: (String) -> Unit,
+    onYearChange: (String, String) -> Unit,
+    onCustomerChange: (String) -> Unit = {}
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = item.type.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                if (item.type != BottleType.EXCHANGE) {
+                    Text(
+                        text = "¥${String.format("%.2f", (item.quantity.toDoubleOrNull() ?: 0.0) * (item.price.toDoubleOrNull() ?: 0.0))}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (item.type == BottleType.RENTAL) {
+                OutlinedTextField(
+                    value = item.customerName,
+                    onValueChange = onCustomerChange,
+                    label = { Text("对象 (客户名称)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            if (item.type == BottleType.RENTAL || item.type == BottleType.EXCHANGE) {
+                Text(
+                    text = "选择年份和数量:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                availableYears.chunked(2).forEach { rowYears ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowYears.forEach { year ->
+                            val yearKey = "${year.year}${year.type}"
+                            val currentQty = item.yearSelections[yearKey]?.toIntOrNull() ?: 0
+
+                            Card(
+                                modifier = Modifier.weight(1f),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = yearKey,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        FilledTonalButton(
+                                            onClick = {
+                                                if (currentQty > 0) {
+                                                    onYearChange(yearKey, (currentQty - 1).toString())
+                                                }
+                                            },
+                                            modifier = Modifier.size(40.dp),
+                                            contentPadding = PaddingValues(0.dp)
+                                        ) {
+                                            Text("-", style = MaterialTheme.typography.headlineSmall)
+                                        }
+                                        Text(
+                                            text = currentQty.toString(),
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 16.dp)
+                                        )
+                                        FilledTonalButton(
+                                            onClick = {
+                                                onYearChange(yearKey, (currentQty + 1).toString())
+                                            },
+                                            modifier = Modifier.size(40.dp),
+                                            contentPadding = PaddingValues(0.dp)
+                                        ) {
+                                            Text("+", style = MaterialTheme.typography.headlineSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (rowYears.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                val totalYearQty = item.yearSelections.values.sumOf { it.toIntOrNull() ?: 0 }
+                Text(
+                    text = "年份总数: $totalYearQty 个",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = item.quantity,
+                        onValueChange = {},
+                        label = { Text("总数量", style = MaterialTheme.typography.titleMedium) },
+                        modifier = Modifier.weight(1f),
+                        readOnly = true,
+                        enabled = false,
+                        textStyle = MaterialTheme.typography.headlineSmall
+                    )
+                    if (item.type != BottleType.EXCHANGE) {
+                        OutlinedTextField(
+                            value = item.price,
+                            onValueChange = onPriceChange,
+                            label = { Text("单价 (元)", style = MaterialTheme.typography.titleMedium) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.headlineSmall
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = item.quantity,
+                        onValueChange = onQuantityChange,
+                        label = { Text("数量", style = MaterialTheme.typography.titleMedium) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.headlineSmall
+                    )
+                    OutlinedTextField(
+                        value = item.price,
+                        onValueChange = onPriceChange,
+                        label = { Text("单价 (元)", style = MaterialTheme.typography.titleMedium) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.headlineSmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PaymentCard(
+    totalAmount: Double,
+    cashAmount: String,
+    wechatAmount: Double,
+    debtAmount: Double,
+    onCashAmountChange: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "总金额:",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "¥ ${String.format("%.2f", totalAmount)}",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Divider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = cashAmount,
+                onValueChange = onCashAmountChange,
+                label = { Text("现金支付 (元)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "微信支付:",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "¥ ${String.format("%.2f", wechatAmount)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (wechatAmount > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+
+            if (debtAmount > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "欠款:",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        text = "¥ ${String.format("%.2f", debtAmount)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+    }
+}

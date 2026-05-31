@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "197619573364",
+    "project_id": "ruanqi-897bd",
+    "storage_bucket": "ruanqi-897bd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:197619573364:android:1c00f1b63f878188c06721",
+        "android_client_info": {
+          "package_name": "com.example.myproductivityapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDNZ6tiAPRKcpL7ZLpdDP5IogEKj--ulMI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
