@@ -71,7 +71,6 @@ fun StatisticsScreen() {
     var showEndDatePicker by remember { mutableStateOf(false) }
     var recordToDelete by remember { mutableStateOf<DeliveryRecord?>(null) }
     var recordToEdit by remember { mutableStateOf<DeliveryRecord?>(null) }
-    var exchangeFilter by remember { mutableStateOf("ALL") }
 
     LaunchedEffect(Unit) {
         deliveryRecordRepo.observeAll().collect { records ->
@@ -86,7 +85,7 @@ fun StatisticsScreen() {
         }
     }
 
-    LaunchedEffect(selectedEmployee, searchKeyword, startDate, endDate, exchangeFilter) {
+    LaunchedEffect(selectedEmployee, searchKeyword, startDate, endDate) {
         filteredRecords = allRecords.filter { record ->
             val matchEmployee = selectedEmployee == null || record.employeeId == selectedEmployee!!.id
             val matchKeyword = searchKeyword.isBlank() ||
@@ -94,14 +93,8 @@ fun StatisticsScreen() {
                                record.notes.contains(searchKeyword, ignoreCase = true)
             val matchStartDate = startDate == null || record.date >= startDate!!
             val matchEndDate = endDate == null || record.date <= endDate!!
-            val matchExchange = when (exchangeFilter) {
-                "ALL" -> true
-                "PENDING" -> record.exchangeStatus == "PENDING"
-                "RETURNED" -> record.exchangeStatus == "RETURNED"
-                else -> true
-            }
 
-            matchEmployee && matchKeyword && matchStartDate && matchEndDate && matchExchange
+            matchEmployee && matchKeyword && matchStartDate && matchEndDate
         }
     }
 
@@ -204,22 +197,6 @@ fun StatisticsScreen() {
                         Text("清除筛选")
                     }
                 }
-            }
-        }
-
-        // 对瓶筛选标签
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("ALL" to "全部", "PENDING" to "未回", "RETURNED" to "已回").forEach { (value, label) ->
-                FilterChip(
-                    selected = exchangeFilter == value,
-                    onClick = { exchangeFilter = value },
-                    label = { Text(label) }
-                )
             }
         }
 
