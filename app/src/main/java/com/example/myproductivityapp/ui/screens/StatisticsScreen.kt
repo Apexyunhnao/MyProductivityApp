@@ -615,19 +615,11 @@ fun RecordCard(record: DeliveryRecord, onEdit: () -> Unit, onDelete: () -> Unit,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (record.exchangeStatus == "PENDING") {
-                    if (record.returnedYear.isNotBlank()) {
-                        Text(
-                            text = "🟡 部分归还（已回:${record.returnedYear}）",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFFFA000)
-                        )
-                    } else {
-                        Text(
-                            text = "🔴 未回",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
+                    Text(
+                        text = "🔴 未回",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
                     Button(
                         onClick = onReturn,
                         colors = ButtonDefaults.buttonColors(
@@ -1347,97 +1339,40 @@ fun ReturnDialog(
     onDismiss: () -> Unit,
     onConfirm: (DeliveryRecord) -> Unit
 ) {
-    // 解析借出年份
-    val loanedYears = remember(record) {
-        val years = mutableListOf<String>()
-        val parts = record.notes.split(" | ")
-        for (part in parts) {
-            if (part.contains("对瓶") && part.contains("(") && part.contains(")")) {
-                val yearPart = part.substringAfter("(").substringBefore(")")
-                years.addAll(yearPart.split("、"))
+    // 解析年份（方案C后每条记录只有一个年份）
+    val year = remember(record) {
+        if (record.yearInfo.isNotBlank()) record.yearInfo
+        else {
+            val parts = record.notes.split(" | ")
+            val match = parts.firstNotNullOfOrNull { part ->
+                if (part.contains("对瓶") && part.contains("(") && part.contains(")")) {
+                    part.substringAfter("(").substringBefore(")")
+                } else null
             }
+            match?.split("、")?.firstOrNull()?.trim() ?: ""
         }
-        if (years.isEmpty()) {
-            record.yearInfo.split("、").filter { it.isNotBlank() }
-        } else {
-            years
-        }
-    }
-
-    // 已归还的年份
-    val alreadyReturned = remember(record) {
-        record.returnedYear.split("、").filter { it.isNotBlank() }.toSet()
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("归还对瓶") },
         text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "借出年份：${loanedYears.joinToString("、")}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Text("确认归还 ${year} 年对瓶？")
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val updated = record.copy(
+                    exchangeStatus = "RETURNED",
+                    returnedYear = year
                 )
-                if (alreadyReturned.isNotEmpty()) {
-                    Text(
-                        text = "已归还：${alreadyReturned.joinToString("、")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                if (loanedYears.isEmpty()) {
-                    Text(
-                        text = "未找到年份信息",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                } else {
-                    loanedYears.forEach { year ->
-                        val y = year.trim()
-                        val isAlreadyReturned = y in alreadyReturned
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (isAlreadyReturned) "$y（已归还）" else y,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isAlreadyReturned)
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
-                            if (!isAlreadyReturned) {
-                                Button(onClick = {
-                                    val newReturned = (alreadyReturned + y).joinToString("、")
-                                    val allLoanYears = loanedYears.map { it.trim() }.toSet()
-                                    val newReturnedSet = (alreadyReturned + y).map { it.trim() }.toSet()
-                                    val allReturned = allLoanYears.all { it in newReturnedSet }
-                                    val updated = record.copy(
-                                        exchangeStatus = if (allReturned) "RETURNED" else "PENDING",
-                                        returnedYear = newReturned
-                                    )
-                                    onConfirm(updated)
-                                }) {
-                                    Text("归还")
-                                }
-                            }
-                        }
-                    }
-                }
+                onConfirm(updated)
+            }) {
+                Text("确认")
             }
         },
-        confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("关闭")
+                Text("取消")
             }
         }
     )
