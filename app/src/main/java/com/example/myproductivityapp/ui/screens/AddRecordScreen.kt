@@ -342,7 +342,8 @@ fun AddRecordScreen(navController: NavHostController) {
                     if (exchangeItem != null) {
                         val exQty = exchangeItem.quantity.toIntOrNull() ?: 0
                         if (exQty > 0 && exchangeItem.yearSelections.isNotEmpty()) {
-                            for ((year, yearQty) in exchangeItem.yearSelections) {
+                            for ((year, yearQtyStr) in exchangeItem.yearSelections) {
+                                val yearQty = yearQtyStr.toIntOrNull() ?: 0
                                 if (yearQty > 0) {
                                     recordsToSave.add(DeliveryRecord(
                                         employeeId = selectedEmployee!!.id,
