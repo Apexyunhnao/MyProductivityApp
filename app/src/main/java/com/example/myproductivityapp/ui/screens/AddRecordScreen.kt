@@ -334,73 +334,26 @@ fun AddRecordScreen(navController: NavHostController) {
 
                     val imagePath = photoFile?.absolutePath ?: ""
 
-                    // 方案C：对瓶按年份拆成多条记录
-                    val recordsToSave = mutableListOf<DeliveryRecord>()
+                    val hasExchange = selectedTypes.contains(BottleType.EXCHANGE)
 
-                    // 1. 对瓶按年份拆分
-                    val exchangeItem = bottleItems[BottleType.EXCHANGE]
-                    if (exchangeItem != null) {
-                        val exQty = exchangeItem.quantity.toIntOrNull() ?: 0
-                        if (exQty > 0 && exchangeItem.yearSelections.isNotEmpty()) {
-                            for ((year, yearQtyStr) in exchangeItem.yearSelections) {
-                                val yearQty = yearQtyStr.toIntOrNull() ?: 0
-                                if (yearQty > 0) {
-                                    recordsToSave.add(DeliveryRecord(
-                                        employeeId = selectedEmployee!!.id,
-                                        employeeName = selectedEmployee!!.name,
-                                        bottleType = "EXCHANGE",
-                                        quantity = yearQty,
-                                        pricePerUnit = 0.0,
-                                        totalAmount = 0.0,
-                                        cashAmount = 0.0,
-                                        wechatAmount = 0.0,
-                                        debtAmount = 0.0,
-                                        yearInfo = year,
-                                        date = System.currentTimeMillis(),
-                                        notes = "对瓶(${year}) x${yearQty}",
-                                        imagePath = imagePath,
-                                        exchangeStatus = "PENDING"
-                                    ))
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. 非对瓶合并为一条
-                    val nonExchangeDetails = bottleDetails.filter { !it.startsWith("对瓶:") }
-                    if (nonExchangeDetails.isNotEmpty()) {
-                        val nonExchangeQty = totalQty - (exchangeItem?.quantity?.toIntOrNull() ?: 0)
-                        val cash = cashAmount.toDoubleOrNull() ?: 0.0
-                        val nonExchangeNotes = buildString {
-                            append(nonExchangeDetails.joinToString(" | "))
-                            if (notes.isNotBlank()) {
-                                append(" | 备注: $notes")
-                            }
-                        }
-                        recordsToSave.add(DeliveryRecord(
-                            employeeId = selectedEmployee!!.id,
-                            employeeName = selectedEmployee!!.name,
-                            bottleType = if (nonExchangeDetails.size == 1 && !selectedTypes.contains(BottleType.EXCHANGE))
-                                selectedTypes.first().name else "MIXED",
-                            quantity = nonExchangeQty,
-                            pricePerUnit = if (nonExchangeQty > 0) totalPrice / nonExchangeQty else 0.0,
-                            totalAmount = totalPrice,
-                            cashAmount = cash,
-                            wechatAmount = wechatAmount,
-                            debtAmount = debtAmount,
-                            yearInfo = "",
-                            date = System.currentTimeMillis(),
-                            notes = nonExchangeNotes,
-                            imagePath = imagePath,
-                            exchangeStatus = "NONE"
-                        ))
-                    }
-
-                    // 3. 保存所有记录
-                    android.util.Log.d("SYNC", "开始保存 ${recordsToSave.size} 条记录到云端...")
-                    for (r in recordsToSave) {
-                        deliveryRecordRepo.save(r)
-                    }
+                    val record = DeliveryRecord(
+                        employeeId = selectedEmployee!!.id,
+                        employeeName = selectedEmployee!!.name,
+                        bottleType = "MIXED",
+                        quantity = totalQty,
+                        pricePerUnit = if (totalQty > 0) totalPrice / totalQty else 0.0,
+                        totalAmount = totalPrice,
+                        cashAmount = cash,
+                        wechatAmount = wechatAmount,
+                        debtAmount = debtAmount,
+                        yearInfo = "",
+                        date = System.currentTimeMillis(),
+                        notes = detailedNotes,
+                        imagePath = imagePath,
+                        exchangeStatus = if (hasExchange) "PENDING" else "NONE"
+                    )
+                    android.util.Log.d("SYNC", "开始保存记录到云端...")
+                    deliveryRecordRepo.save(record)
                     android.util.Log.d("SYNC", "记录已保存")
                 }
 

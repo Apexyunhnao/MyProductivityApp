@@ -71,7 +71,6 @@ fun StatisticsScreen() {
     var showEndDatePicker by remember { mutableStateOf(false) }
     var recordToDelete by remember { mutableStateOf<DeliveryRecord?>(null) }
     var recordToEdit by remember { mutableStateOf<DeliveryRecord?>(null) }
-    var recordToReturn by remember { mutableStateOf<DeliveryRecord?>(null) }
     var exchangeFilter by remember { mutableStateOf("ALL") }
 
     LaunchedEffect(Unit) {
@@ -236,49 +235,23 @@ fun StatisticsScreen() {
                 )
             }
         } else {
-            when (exchangeFilter) {
-                "PENDING", "RETURNED" -> {
-                    ExchangeSummaryView(
-                        records = filteredRecords,
-                        exchangeType = exchangeFilter,
-                        onReturnYear = { empId, year ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredRecords) { record ->
+                    RecordCard(
+                        record = record,
+                        onEdit = { recordToEdit = record },
+                        onDelete = { recordToDelete = record },
+                        onReturn = {
                             scope.launch {
-                                val targets = filteredRecords.filter {
-                                    it.employeeId == empId && it.exchangeStatus == "PENDING"
-                                }
-                                for (rec in targets) {
-                                    val loaned = parseLoanedYears(rec)
-                                    if (year in loaned) {
-                                        val already = rec.returnedYear.split("、").filter { it.isNotBlank() }.toSet()
-                                        if (year !in already) {
-                                            val newReturned = (already + year).joinToString("、")
-                                            val allDone = loaned.toSet() == (already + year)
-                                            deliveryRecordRepo.update(rec.copy(
-                                                exchangeStatus = if (allDone) "RETURNED" else "PENDING",
-                                                returnedYear = newReturned
-                                            ))
-                                        }
-                                    }
-                                }
+                                val newStatus = if (record.exchangeStatus == "PENDING") "RETURNED" else "PENDING"
+                                deliveryRecordRepo.update(record.copy(exchangeStatus = newStatus))
                             }
                         }
                     )
-                }
-                else -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(filteredRecords) { record ->
-                            RecordCard(
-                                record = record,
-                                onEdit = { recordToEdit = record },
-                                onDelete = { recordToDelete = record },
-                                onReturn = { recordToReturn = record }
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -603,7 +576,7 @@ fun RecordCard(record: DeliveryRecord, onEdit: () -> Unit, onDelete: () -> Unit,
             }
         }
 
-        // 对瓶状态
+        // 对瓶状态切换
         if (record.exchangeStatus == "PENDING" || record.exchangeStatus == "RETURNED") {
             Spacer(modifier = Modifier.height(8.dp))
             Divider()
@@ -613,26 +586,24 @@ fun RecordCard(record: DeliveryRecord, onEdit: () -> Unit, onDelete: () -> Unit,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (record.exchangeStatus == "PENDING") {
-                    Text(
-                        text = "🔴 未回",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
+                Text(
+                    text = if (record.exchangeStatus == "PENDING") "🔴 未回" else "🟢 已回",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (record.exchangeStatus == "PENDING")
+                        MaterialTheme.colorScheme.error
+                    else
+                        MaterialTheme.colorScheme.primary
+                )
+                Button(
+                    onClick = onReturn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (record.exchangeStatus == "PENDING")
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.secondary
                     )
-                    Button(
-                        onClick = onReturn,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Text("归还")
-                    }
-                } else {
-                    Text(
-                        text = "🟢 已回 ${record.returnedYear}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                ) {
+                    Text(if (record.exchangeStatus == "PENDING") "归还" else "取消归还")
                 }
             }
         }
@@ -1328,166 +1299,5 @@ fun EditRecordDialog(
                 }
             }
         )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ReturnDialog(
-    record: DeliveryRecord,
-    onDismiss: () -> Unit,
-    onConfirm: (DeliveryRecord) -> Unit
-) {
-    // 解析年份（方案C后每条记录只有一个年份）
-    val year = remember(record) {
-        if (record.yearInfo.isNotBlank()) record.yearInfo
-        else {
-            val parts = record.notes.split(" | ")
-            val match = parts.firstNotNullOfOrNull { part ->
-                if (part.contains("对瓶") && part.contains("(") && part.contains(")")) {
-                    part.substringAfter("(").substringBefore(")")
-                } else null
-            }
-            match?.split("、")?.firstOrNull()?.trim() ?: ""
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("归还对瓶") },
-        text = {
-            Text("确认归还 ${year} 年对瓶？")
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val updated = record.copy(
-                    exchangeStatus = "RETURNED",
-                    returnedYear = year
-                )
-                onConfirm(updated)
-            }) {
-                Text("确认")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
-// ============ 对瓶交换汇总视图（按年份分组）============
-
-/** 解析一条记录中所有借出的对瓶年份 */
-private fun parseLoanedYears(record: DeliveryRecord): List<String> {
-    val years = mutableListOf<String>()
-    val parts = record.notes.split(" | ")
-    for (part in parts) {
-        if (part.contains("对瓶") && part.contains("(") && part.contains(")")) {
-            val yearPart = part.substringAfter("(").substringBefore(")")
-            years.addAll(yearPart.split("、"))
-        }
-    }
-    if (years.isEmpty()) {
-        years.addAll(record.yearInfo.split("、").filter { it.isNotBlank() })
-    }
-    return years.distinct().map { it.trim() }.filter { it.isNotBlank() }
-}
-
-private data class YearRow(
-    val year: String,
-    val employeeId: Long,
-    val employeeName: String
-)
-
-@Composable
-private fun ExchangeSummaryView(
-    records: List<DeliveryRecord>,
-    exchangeType: String,
-    onReturnYear: (Long, String) -> Unit
-) {
-    var confirmTarget by remember { mutableStateOf<YearRow?>(null) }
-
-    val yearRows = remember(records, exchangeType) {
-        val rows = mutableListOf<YearRow>()
-        for (rec in records) {
-            if (exchangeType == "PENDING") {
-                val loaned = parseLoanedYears(rec)
-                val returned = rec.returnedYear.split("、").filter { it.isNotBlank() }.toSet()
-                for (y in loaned.filter { it !in returned }) {
-                    rows.add(YearRow(y, rec.employeeId, rec.employeeName))
-                }
-            } else {
-                for (y in rec.returnedYear.split("、").filter { it.isNotBlank() }) {
-                    rows.add(YearRow(y.trim(), rec.employeeId, rec.employeeName))
-                }
-            }
-        }
-        rows.distinct().sortedWith(compareBy({ it.year }, { it.employeeName }))
-    }
-
-    // 确认弹窗
-    if (confirmTarget != null) {
-        AlertDialog(
-            onDismissRequest = { confirmTarget = null },
-            title = { Text("确认归还") },
-            text = { Text("${confirmTarget!!.employeeName} 归还 ${confirmTarget!!.year} 年对瓶？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onReturnYear(confirmTarget!!.employeeId, confirmTarget!!.year)
-                    confirmTarget = null
-                }) { Text("确认") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmTarget = null }) { Text("取消") }
-            }
-        )
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // 按年份分组
-        val grouped = yearRows.groupBy { it.year }
-        items(grouped.keys.sorted()) { year ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "${year}年 ${if (exchangeType == "PENDING") "未回" else "已回"}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (exchangeType == "PENDING")
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    grouped[year]?.forEach { row ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = row.employeeName,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            if (exchangeType == "PENDING") {
-                                Button(onClick = { confirmTarget = row }) {
-                                    Text("归还")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
