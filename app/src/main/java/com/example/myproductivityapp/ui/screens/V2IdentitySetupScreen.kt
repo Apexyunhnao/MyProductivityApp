@@ -12,15 +12,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myproductivityapp.data.AppDatabase
-import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.Employee
+import com.example.myproductivityapp.data.remote.RemoteDataClient
 import com.example.myproductivityapp.data.repository.EmployeeRepository
 
 @Composable
 fun V2IdentitySetupScreen(
-    client: CloudBaseClient,
+    client: RemoteDataClient,
     onConfigured: (DeviceIdentity) -> Unit
 ) {
     val context = LocalContext.current
@@ -58,7 +58,7 @@ fun V2IdentitySetupScreen(
             Text("站长", fontSize = 22.sp)
         }
 
-        Divider()
+        HorizontalDivider()
         Text("送气员：点自己的名字", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
         if (loading && employees.isEmpty()) {
@@ -68,7 +68,7 @@ fun V2IdentitySetupScreen(
                 Text("正在读取员工…")
             }
         } else if (employees.isEmpty()) {
-            Text("还没有员工，请先用营业员身份进入设置添加员工。")
+            Text("还没有员工。先用营业员身份进入设置添加员工，再回来绑定送气员手机。")
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f),
