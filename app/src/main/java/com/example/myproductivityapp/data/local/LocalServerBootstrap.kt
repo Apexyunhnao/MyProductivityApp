@@ -11,20 +11,26 @@ import com.example.myproductivityapp.data.repository.PriceConfigRepository
 /**
  * 从旧 CloudBase 版本切换到站内服务器时执行一次。
  * 业务数据不删除，只清空旧远端 ID 并重新上传到新服务器。
+ *
+ * reset 标记和 migrated 标记分开：如果上传到一半断网，重试只补传 unsynced，
+ * 不会再次清空已经取得的新服务器 ID，从而避免重复创建远端记录。
  */
 class LocalServerBootstrap(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("local_server_bootstrap", Context.MODE_PRIVATE)
 
-    fun isDone(): Boolean = prefs.getBoolean("legacy_remote_migrated", false)
+    fun isDone(): Boolean = prefs.getBoolean(KEY_MIGRATED, false)
 
     suspend fun runIfNeeded(db: AppDatabase, client: RemoteDataClient): Boolean {
         if (isDone()) return true
         if (!client.health()) return false
 
-        db.employeeDao().resetRemoteSyncForLocalServer()
-        db.deliveryRecordDao().resetRemoteSyncForLocalServer()
-        db.priceConfigDao().resetRemoteSyncForLocalServer()
-        db.bottleYearDao().resetRemoteSyncForLocalServer()
+        if (!prefs.getBoolean(KEY_RESET_DONE, false)) {
+            db.employeeDao().resetRemoteSyncForLocalServer()
+            db.deliveryRecordDao().resetRemoteSyncForLocalServer()
+            db.priceConfigDao().resetRemoteSyncForLocalServer()
+            db.bottleYearDao().resetRemoteSyncForLocalServer()
+            prefs.edit().putBoolean(KEY_RESET_DONE, true).apply()
+        }
 
         val employeeRepo = EmployeeRepository(db.employeeDao(), client)
         val recordRepo = DeliveryRecordRepository(db.deliveryRecordDao(), client)
@@ -43,8 +49,13 @@ class LocalServerBootstrap(context: Context) {
             db.deliveryRecordDao().getUnsynced().isEmpty()
 
         if (success) {
-            prefs.edit().putBoolean("legacy_remote_migrated", true).apply()
+            prefs.edit().putBoolean(KEY_MIGRATED, true).apply()
         }
         return success
+    }
+
+    companion object {
+        private const val KEY_RESET_DONE = "legacy_remote_reset_done"
+        private const val KEY_MIGRATED = "legacy_remote_migrated"
     }
 }
