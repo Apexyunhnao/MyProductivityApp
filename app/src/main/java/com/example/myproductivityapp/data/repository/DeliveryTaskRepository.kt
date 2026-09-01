@@ -14,8 +14,8 @@ class DeliveryTaskRepository(
     private val table = "delivery_tasks"
 
     fun observeOpenTasks(): Flow<List<DeliveryTask>> = dao.observeOpenTasks()
-    fun observeOpenTasksForEmployee(employeeId: Long): Flow<List<DeliveryTask>> =
-        dao.observeOpenTasksForEmployee(employeeId)
+    fun observeOpenTasksForEmployeeRemote(employeeRemoteId: String): Flow<List<DeliveryTask>> =
+        dao.observeOpenTasksForEmployeeRemote(employeeRemoteId)
 
     suspend fun save(task: DeliveryTask): Long = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -60,6 +60,7 @@ class DeliveryTaskRepository(
                     deliveryQuantity = obj.int("deliveryQuantity"),
                     pickupQuantity = obj.int("pickupQuantity"),
                     assignedEmployeeId = (obj["assignedEmployeeId"] as? Number)?.toLong(),
+                    assignedEmployeeRemoteId = obj.string("assignedEmployeeRemoteId"),
                     assignedEmployeeName = obj.string("assignedEmployeeName"),
                     paymentStatus = obj.string("paymentStatus", "UNPAID"),
                     amountToCollect = obj.double("amountToCollect"),
@@ -94,6 +95,7 @@ class DeliveryTaskRepository(
         "deliveryQuantity" to t.deliveryQuantity,
         "pickupQuantity" to t.pickupQuantity,
         "assignedEmployeeId" to t.assignedEmployeeId,
+        "assignedEmployeeRemoteId" to t.assignedEmployeeRemoteId,
         "assignedEmployeeName" to t.assignedEmployeeName,
         "paymentStatus" to t.paymentStatus,
         "amountToCollect" to t.amountToCollect,
