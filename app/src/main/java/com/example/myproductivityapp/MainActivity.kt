@@ -76,15 +76,21 @@ fun V2MainScreen(client: CloudBaseClient) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: "record"
 
-    // 现有四类数据仍沿用原来的离线优先同步；V2 新表的云同步在后续阶段补齐。
     LaunchedEffect(Unit) {
         val db = AppDatabase.getDatabase(context)
         val employeeRepo = EmployeeRepository(db.employeeDao(), client)
         val deliveryRecordRepo = DeliveryRecordRepository(db.deliveryRecordDao(), client)
         val priceConfigRepo = PriceConfigRepository(db.priceConfigDao(), client)
         val bottleYearRepo = BottleYearRepository(db.bottleYearDao(), client)
+        val deliveryTaskRepo = DeliveryTaskRepository(db.deliveryTaskDao(), client)
 
-        val sync = SyncManager(employeeRepo, deliveryRecordRepo, priceConfigRepo, bottleYearRepo)
+        val sync = SyncManager(
+            employeeRepo = employeeRepo,
+            deliveryRecordRepo = deliveryRecordRepo,
+            priceConfigRepo = priceConfigRepo,
+            bottleYearRepo = bottleYearRepo,
+            deliveryTaskRepo = deliveryTaskRepo
+        )
         sync.initialSync()
         sync.startWatch()
         sync.startFlush()
