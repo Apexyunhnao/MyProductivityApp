@@ -17,32 +17,32 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.myproductivityapp.auth.AuthState
-import com.example.myproductivityapp.auth.AuthViewModel
 import com.example.myproductivityapp.data.AppDatabase
-import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceIdentityManager
+import com.example.myproductivityapp.data.local.ServerConfig
+import com.example.myproductivityapp.data.local.ServerConfigManager
+import com.example.myproductivityapp.data.remote.LocalServerClient
+import com.example.myproductivityapp.data.remote.RemoteDataClient
 import com.example.myproductivityapp.data.repository.*
 import com.example.myproductivityapp.ui.screens.*
 import com.example.myproductivityapp.ui.theme.MyProductivityAppTheme
 
 class MainActivity : ComponentActivity() {
     companion object {
-        lateinit var cloudClient: CloudBaseClient
+        // 保留旧名字，减少 V2 过渡期对旧页面的改动；实际已经是本地服务器客户端。
+        lateinit var cloudClient: RemoteDataClient
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        cloudClient = CloudBaseClient("gas-station-d2gq3uauq82a3cc6d")
-
         setContent {
             MyProductivityAppTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppEntryPoint()
+                    V2AppRoot()
                 }
             }
         }
@@ -50,28 +50,41 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppEntryPoint() {
-    val client = MainActivity.cloudClient
-    val viewModel = remember { AuthViewModel(client) }
-    val authState by viewModel.authState.collectAsState()
+private fun V2AppRoot() {
+    val context = LocalContext.current
+    val serverManager = remember { ServerConfigManager(context) }
+    var serverConfig by remember { mutableStateOf(serverManager.load()) }
 
-    when (authState) {
-        is AuthState.Loading -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("正在连接云端...")
-                }
-            }
+    val config = serverConfig
+    if (config == null) {
+        V2ServerSetupScreen { connected ->
+            serverManager.save(connected)
+            serverConfig = connected
         }
-        is AuthState.LoggedOut -> LoginScreen(viewModel = viewModel)
-        is AuthState.LoggedIn -> V2IdentityGate(client)
+        return
     }
+
+    val client = remember(config.baseUrl, config.apiKey) {
+        LocalServerClient(config.baseUrl, config.apiKey)
+    }
+    SideEffect {
+        MainActivity.cloudClient = client
+    }
+
+    V2IdentityGate(
+        client = client,
+        onChangeServer = {
+            serverManager.clear()
+            serverConfig = null
+        }
+    )
 }
 
 @Composable
-private fun V2IdentityGate(client: CloudBaseClient) {
+private fun V2IdentityGate(
+    client: RemoteDataClient,
+    onChangeServer: () -> Unit
+) {
     val context = LocalContext.current
     val manager = remember { DeviceIdentityManager(context) }
     var identity by remember { mutableStateOf(manager.load()) }
@@ -89,7 +102,8 @@ private fun V2IdentityGate(client: CloudBaseClient) {
             onChangeIdentity = {
                 manager.clear()
                 identity = null
-            }
+            },
+            onChangeServer = onChangeServer
         )
     }
 }
@@ -97,16 +111,17 @@ private fun V2IdentityGate(client: CloudBaseClient) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun V2MainScreen(
-    client: CloudBaseClient,
+    client: RemoteDataClient,
     identity: DeviceIdentity,
-    onChangeIdentity: () -> Unit
+    onChangeIdentity: () -> Unit,
+    onChangeServer: () -> Unit
 ) {
     val context = LocalContext.current
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: "record"
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(client) {
         val db = AppDatabase.getDatabase(context)
         val employeeRepo = EmployeeRepository(db.employeeDao(), client)
         val deliveryRecordRepo = DeliveryRecordRepository(db.deliveryRecordDao(), client)
@@ -141,6 +156,7 @@ fun V2MainScreen(
                 actions = {
                     if (currentRoute == "settings") {
                         TextButton(onClick = onChangeIdentity) { Text("换身份") }
+                        TextButton(onClick = onChangeServer) { Text("服务器") }
                     } else {
                         IconButton(onClick = { navController.navigate("settings") }) {
                             Icon(Icons.Default.Settings, contentDescription = "设置")
