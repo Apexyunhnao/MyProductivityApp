@@ -45,14 +45,28 @@ fun V2IdentitySetupScreen(
         Text("只选一次，以后自动记住。", fontSize = 18.sp)
 
         Button(
-            onClick = { onConfigured(DeviceIdentity(DeviceRole.OFFICE, null, "营业员")) },
+            onClick = {
+                onConfigured(
+                    DeviceIdentity(
+                        role = DeviceRole.OFFICE,
+                        employeeName = "营业员"
+                    )
+                )
+            },
             modifier = Modifier.fillMaxWidth().height(62.dp)
         ) {
             Text("营业员", fontSize = 22.sp)
         }
 
         Button(
-            onClick = { onConfigured(DeviceIdentity(DeviceRole.MANAGER, null, "站长")) },
+            onClick = {
+                onConfigured(
+                    DeviceIdentity(
+                        role = DeviceRole.MANAGER,
+                        employeeName = "站长"
+                    )
+                )
+            },
             modifier = Modifier.fillMaxWidth().height(62.dp)
         ) {
             Text("站长", fontSize = 22.sp)
@@ -81,6 +95,7 @@ fun V2IdentitySetupScreen(
                                 DeviceIdentity(
                                     role = DeviceRole.DRIVER,
                                     employeeId = employee.id,
+                                    employeeRemoteId = employee.firestoreId,
                                     employeeName = employee.name
                                 )
                             )
