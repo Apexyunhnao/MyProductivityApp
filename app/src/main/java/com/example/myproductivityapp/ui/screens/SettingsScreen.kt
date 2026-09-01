@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.model.BottleType
@@ -24,7 +26,22 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(isAdmin: Boolean = true) {
+    // 权限加固：送气工即使被路由误放进来也看不到任何管理内容。
+    // 营业员/站长 isAdmin=true，不受影响。
+    if (!isAdmin) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("没有权限", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text("只有营业员/站长可以管理员工、价格和年份。", style = MaterialTheme.typography.bodyLarge)
+        }
+        return
+    }
+
     val context = LocalContext.current
     val database = remember { AppDatabase.getDatabase(context) }
     val viewModel: EmployeeViewModel = viewModel()

@@ -26,10 +26,16 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
     LaunchedEffect(Unit) {
         db.deliveryRecordDao().getAllRecords().collect { all ->
             records = if (identity.role == DeviceRole.DRIVER) {
-                // 送气工只统计自己的记录：优先稳定 remote id，老数据无 remote id 时用姓名兜底
-                all.filter {
-                    (identity.employeeRemoteId.isNotBlank() && it.employeeFirestoreId == identity.employeeRemoteId) ||
-                        (identity.employeeRemoteId.isBlank() && it.employeeName == identity.employeeName)
+                val remoteId = identity.employeeRemoteId
+                // 送气工只统计自己的记录：优先服务器稳定 ID；
+                // 老数据 employeeFirestoreId 为空时用姓名兜底（新记录保存时已带上 remoteId，不会串人）。
+                all.filter { rec ->
+                    if (remoteId.isNotBlank()) {
+                        rec.employeeFirestoreId == remoteId ||
+                            (rec.employeeFirestoreId.isBlank() && rec.employeeName == identity.employeeName)
+                    } else {
+                        rec.employeeName == identity.employeeName
+                    }
                 }
             } else {
                 // 营业员/站长看全站

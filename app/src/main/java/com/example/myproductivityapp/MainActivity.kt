@@ -298,7 +298,7 @@ fun V2MainScreen(
             composable("record") { V2RecordScreen() }
             composable("tasks") { V2TasksScreen(identity) }
             composable("ledger") { V2LedgerScreen(identity) }
-            composable("settings") { SettingsScreen() }
+            composable("settings") { SettingsScreen(isAdmin = !isDriver) }
         }
     }
 }

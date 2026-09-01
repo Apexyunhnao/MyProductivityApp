@@ -296,6 +296,8 @@ fun V2RecordScreen() {
                                     DeliveryRecord(
                                         employeeId = selected.id,
                                         employeeName = selected.name,
+                                        // 必须带上员工的服务器稳定 ID，送气工统计才能按 employeeFirestoreId 正确过滤
+                                        employeeFirestoreId = selected.firestoreId,
                                         bottleType = "MIXED",
                                         quantity = totalQty,
                                         pricePerUnit = if (totalQty > 0) total.toDouble() / totalQty else 0.0,
