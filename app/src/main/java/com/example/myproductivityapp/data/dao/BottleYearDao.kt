@@ -23,4 +23,7 @@ interface BottleYearDao {
 
     @Query("SELECT * FROM bottle_years WHERE synced = 0")
     suspend fun getUnsynced(): List<BottleYear>
+
+    @Query("UPDATE bottle_years SET firestoreId = '', synced = 0")
+    suspend fun resetRemoteSyncForLocalServer()
 }
