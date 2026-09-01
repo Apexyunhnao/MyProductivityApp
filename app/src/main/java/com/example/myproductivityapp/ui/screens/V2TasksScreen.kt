@@ -34,9 +34,15 @@ fun V2TasksScreen(identity: DeviceIdentity) {
     var showAddDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(identity) {
-        val driverId = identity.employeeId
-        if (identity.role == DeviceRole.DRIVER && driverId != null) {
-            db.deliveryTaskDao().observeOpenTasksForEmployee(driverId).collect { tasks = it }
+        val remoteId = identity.employeeRemoteId
+        if (identity.role == DeviceRole.DRIVER && remoteId.isNotBlank()) {
+            db.deliveryTaskDao().observeOpenTasksForEmployeeRemote(remoteId).collect { tasks = it }
+        } else if (identity.role == DeviceRole.DRIVER) {
+            // 兼容旧绑定；重新“换身份”绑定一次后会使用稳定 remote id。
+            val localId = identity.employeeId
+            if (localId != null) {
+                db.deliveryTaskDao().observeOpenTasksForEmployee(localId).collect { tasks = it }
+            }
         } else {
             db.deliveryTaskDao().observeOpenTasks().collect { tasks = it }
         }
@@ -198,10 +204,14 @@ private fun AddTaskDialog(
     var payment by remember { mutableStateOf(PaymentStatus.UNPAID) }
     var amountPaid by remember { mutableStateOf("") }
     var oldDebt by remember { mutableStateOf("") }
-    var selectedEmployee by remember(identity) {
+    var selectedEmployee by remember(identity, employees) {
         mutableStateOf(
-            if (identity.role == DeviceRole.DRIVER) employees.firstOrNull { it.id == identity.employeeId }
-            else null
+            if (identity.role == DeviceRole.DRIVER) {
+                employees.firstOrNull { employee ->
+                    if (identity.employeeRemoteId.isNotBlank()) employee.firestoreId == identity.employeeRemoteId
+                    else employee.id == identity.employeeId
+                }
+            } else null
         )
     }
     var urgent by remember { mutableStateOf(false) }
@@ -275,6 +285,7 @@ private fun AddTaskDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val assignee = selectedEmployee
                     onSave(
                         DeliveryTask(
                             customerName = customer,
@@ -282,8 +293,11 @@ private fun AddTaskDialog(
                             taskType = type.name,
                             deliveryQuantity = if (type == TaskType.PICKUP_ONLY) 0 else deliveryQty.toIntOrNull() ?: 0,
                             pickupQuantity = pickupQty.toIntOrNull() ?: 0,
-                            assignedEmployeeId = selectedEmployee?.id ?: identity.employeeId.takeIf { identity.role == DeviceRole.DRIVER },
-                            assignedEmployeeName = selectedEmployee?.name ?: identity.employeeName.takeIf { identity.role == DeviceRole.DRIVER }.orEmpty(),
+                            assignedEmployeeId = assignee?.id ?: identity.employeeId.takeIf { identity.role == DeviceRole.DRIVER },
+                            assignedEmployeeRemoteId = assignee?.firestoreId
+                                ?: identity.employeeRemoteId.takeIf { identity.role == DeviceRole.DRIVER }.orEmpty(),
+                            assignedEmployeeName = assignee?.name
+                                ?: identity.employeeName.takeIf { identity.role == DeviceRole.DRIVER }.orEmpty(),
                             paymentStatus = payment.name,
                             amountPaid = amountPaid.toDoubleOrNull() ?: 0.0,
                             debtReminder = oldDebt.toDoubleOrNull() ?: 0.0,
