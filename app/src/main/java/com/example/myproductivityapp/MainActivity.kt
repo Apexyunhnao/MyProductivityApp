@@ -11,8 +11,10 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -20,6 +22,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceIdentityManager
+import com.example.myproductivityapp.data.local.LocalServerBootstrap
 import com.example.myproductivityapp.data.local.ServerConfigManager
 import com.example.myproductivityapp.data.remote.LocalServerClient
 import com.example.myproductivityapp.data.remote.RemoteDataClient
@@ -69,13 +72,67 @@ private fun V2AppRoot() {
     // 旧页面/旧 ViewModel 仍从这个兼容入口拿 client；必须在子页面组合前就赋值。
     MainActivity.cloudClient = client
 
-    V2IdentityGate(
+    V2BootstrapGate(
         client = client,
         onChangeServer = {
             serverManager.clear()
             serverConfig = null
         }
     )
+}
+
+@Composable
+private fun V2BootstrapGate(
+    client: RemoteDataClient,
+    onChangeServer: () -> Unit
+) {
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context) }
+    val bootstrap = remember { LocalServerBootstrap(context) }
+    var result by remember { mutableStateOf<Boolean?>(if (bootstrap.isDone()) true else null) }
+    var retry by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(client, retry) {
+        if (result != true) {
+            result = runCatching { bootstrap.runIfNeeded(db, client) }.getOrDefault(false)
+        }
+    }
+
+    when (result) {
+        true -> V2IdentityGate(client = client, onChangeServer = onChangeServer)
+        null -> Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text("正在把旧数据迁移到新站服务器…")
+                Text("原来的账不会删除")
+            }
+        }
+        false -> Box(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("旧数据迁移没有完成", style = MaterialTheme.typography.headlineSmall)
+                Text("请先确认小主机服务器正在运行、手机能连到服务器。原来的本机数据没有被删除。")
+                Button(onClick = {
+                    result = null
+                    retry++
+                }) {
+                    Text("重试迁移")
+                }
+                OutlinedButton(onClick = onChangeServer) {
+                    Text("修改服务器地址")
+                }
+            }
+        }
+    }
 }
 
 @Composable
