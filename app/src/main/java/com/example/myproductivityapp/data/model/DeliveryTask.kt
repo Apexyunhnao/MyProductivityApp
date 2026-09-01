@@ -5,7 +5,7 @@ import androidx.room.PrimaryKey
 
 /**
  * 待办任务：记录“还需要做什么”，与已经完成的配送记录分开。
- * 适用于客户叫气、客户自送空瓶、已付款待送回、只收瓶等场景。
+ * assignedEmployeeRemoteId 使用服务器稳定 ID，避免不同手机的 Room 本地 id 不一致。
  */
 @Entity(tableName = "delivery_tasks")
 data class DeliveryTask(
@@ -19,6 +19,7 @@ data class DeliveryTask(
     val deliveryQuantity: Int = 0,
     val pickupQuantity: Int = 0,
     val assignedEmployeeId: Long? = null,
+    val assignedEmployeeRemoteId: String = "",
     val assignedEmployeeName: String = "",
     val paymentStatus: String = PaymentStatus.UNPAID.name,
     val amountToCollect: Double = 0.0,
