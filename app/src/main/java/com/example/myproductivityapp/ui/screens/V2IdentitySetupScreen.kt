@@ -17,7 +17,6 @@ import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.Employee
 import com.example.myproductivityapp.data.repository.EmployeeRepository
-import kotlinx.coroutines.launch
 
 @Composable
 fun V2IdentitySetupScreen(
@@ -27,15 +26,12 @@ fun V2IdentitySetupScreen(
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     val repo = remember { EmployeeRepository(db.employeeDao(), client) }
-    val scope = rememberCoroutineScope()
     var employees by remember { mutableStateOf<List<Employee>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        scope.launch {
-            runCatching { repo.syncFromCloud() }
-            loading = false
-        }
+        runCatching { repo.syncFromCloud() }
+        loading = false
     }
     LaunchedEffect(Unit) {
         repo.observeAll().collect { employees = it }
@@ -62,7 +58,7 @@ fun V2IdentitySetupScreen(
             Text("站长", fontSize = 22.sp)
         }
 
-        HorizontalDivider()
+        Divider()
         Text("送气员：点自己的名字", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
         if (loading && employees.isEmpty()) {
@@ -74,7 +70,10 @@ fun V2IdentitySetupScreen(
         } else if (employees.isEmpty()) {
             Text("还没有员工，请先用营业员身份进入设置添加员工。")
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(employees, key = { it.id }) { employee ->
                     OutlinedButton(
                         onClick = {
