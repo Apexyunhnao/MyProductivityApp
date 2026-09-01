@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, ConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = BASE_DIR / "data" / "gas_station.db"
@@ -30,10 +29,6 @@ ALLOWED_RESOURCES = {
 }
 
 app = FastAPI(title="Gas Station Local Server", version="2.0")
-
-
-class JsonObject(BaseModel):
-    model_config = ConfigDict(extra="allow")
 
 
 def now_ms() -> int:
@@ -97,6 +92,11 @@ def row_to_object(row: sqlite3.Row) -> dict[str, Any]:
 def health() -> dict[str, Any]:
     init_db()
     return {"ok": True, "database": str(DB_PATH), "time": now_ms()}
+
+
+@app.get("/api-meta/ping", dependencies=[Depends(require_key)])
+def authenticated_ping() -> dict[str, Any]:
+    return {"ok": True, "time": now_ms()}
 
 
 @app.get("/api/{resource}", dependencies=[Depends(require_key)])
