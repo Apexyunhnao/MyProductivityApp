@@ -1,15 +1,15 @@
 package com.example.myproductivityapp.data.repository
 
-import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
 import com.example.myproductivityapp.data.dao.DeliveryTaskDao
 import com.example.myproductivityapp.data.model.DeliveryTask
+import com.example.myproductivityapp.data.remote.RemoteDataClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 class DeliveryTaskRepository(
     private val dao: DeliveryTaskDao,
-    private val client: CloudBaseClient
+    private val client: RemoteDataClient
 ) {
     private val table = "delivery_tasks"
 
