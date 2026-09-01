@@ -1,5 +1,10 @@
 package com.example.myproductivityapp.ui.screens
 
+import android.Manifest
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -8,16 +13,20 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.example.myproductivityapp.MainActivity
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.model.*
@@ -26,6 +35,10 @@ import com.example.myproductivityapp.data.repository.DeliveryRecordRepository
 import com.example.myproductivityapp.data.repository.EmployeeRepository
 import com.example.myproductivityapp.data.repository.PriceConfigRepository
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** V2 高频记账：一屏完成选人、记瓶、记钱、保存。 */
 @Composable
@@ -57,6 +70,55 @@ fun V2RecordScreen() {
     var note by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+
+    // 拍照：租瓶押金单（imagePath）+ 备注照片（imageUrl，复用旧字段做第二张图的最小兼容）
+    var rentalImagePath by remember { mutableStateOf("") }
+    var noteImagePath by remember { mutableStateOf("") }
+    var pendingPhotoSlot by remember { mutableStateOf("") } // "rental" | "note"
+    var photoFile by remember { mutableStateOf<File?>(null) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
+
+    fun createPhotoFile(context: android.content.Context): File {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val dir = File(context.filesDir, "delivery_images")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "IMG_${stamp}.jpg")
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { _ ->
+        val file = photoFile
+        val hasContent = file?.let { it.exists() && it.length() > 0 } ?: false
+        if (hasContent && file != null) {
+            when (pendingPhotoSlot) {
+                "rental" -> rentalImagePath = file.absolutePath
+                "note" -> noteImagePath = file.absolutePath
+            }
+        } else {
+            file?.delete()
+        }
+        photoFile = null
+        pendingPhotoSlot = ""
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val file = createPhotoFile(context)
+            photoFile = file
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            cameraLauncher.launch(uri)
+        } else {
+            showPermissionDialog = true
+        }
+    }
+
+    fun requestTakePhoto(slot: String) {
+        pendingPhotoSlot = slot
+        permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
 
     LaunchedEffect(Unit) {
         employeeRepo.observeAll().collect { list ->
@@ -99,6 +161,8 @@ fun V2RecordScreen() {
         cashText = ""
         wechatText = ""
         note = ""
+        rentalImagePath = ""
+        noteImagePath = ""
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { inner ->
@@ -143,7 +207,10 @@ fun V2RecordScreen() {
                 marks = marks,
                 counts = rentalMarks,
                 customer = rentalCustomer,
-                onCustomer = { rentalCustomer = it }
+                onCustomer = { rentalCustomer = it },
+                photoLabel = "拍押金单",
+                photoPath = rentalImagePath,
+                onTakePhoto = { requestTakePhoto("rental") }
             )
 
             MarkCounter(
@@ -198,6 +265,13 @@ fun V2RecordScreen() {
                 minLines = 2
             )
 
+            // 备注拍照（现场照片/单据）
+            PhotoSlotButton(
+                label = "拍现场照片/单据",
+                photoPath = noteImagePath,
+                onTakePhoto = { requestTakePhoto("note") }
+            )
+
             Button(
                 modifier = Modifier.fillMaxWidth().height(62.dp),
                 enabled = !saving,
@@ -231,7 +305,9 @@ fun V2RecordScreen() {
                                         debtAmount = debt,
                                         date = System.currentTimeMillis(),
                                         notes = notes.joinToString(" | "),
-                                        exchangeStatus = if (exchangeQty > 0) "PENDING" else "NONE"
+                                        exchangeStatus = if (exchangeQty > 0) "PENDING" else "NONE",
+                                        imagePath = rentalImagePath,
+                                        imageUrl = noteImagePath
                                     )
                                 )
 
@@ -262,6 +338,17 @@ fun V2RecordScreen() {
 
             Spacer(Modifier.height(20.dp))
         }
+    }
+
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = { Text("需要相机权限") },
+            text = { Text("拍照需要相机权限。请在系统设置中允许本应用使用相机后再试。") },
+            confirmButton = {
+                TextButton(onClick = { showPermissionDialog = false }) { Text("知道了") }
+            }
+        )
     }
 }
 
@@ -310,7 +397,10 @@ private fun MarkCounter(
     marks: List<String>,
     counts: MutableMap<String, Int>,
     customer: String? = null,
-    onCustomer: (String) -> Unit = {}
+    onCustomer: (String) -> Unit = {},
+    photoLabel: String? = null,
+    photoPath: String = "",
+    onTakePhoto: () -> Unit = {}
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -324,6 +414,9 @@ private fun MarkCounter(
                     label = { Text("租给谁") },
                     singleLine = true
                 )
+                if (photoLabel != null) {
+                    PhotoSlotButton(label = photoLabel, photoPath = photoPath, onTakePhoto = onTakePhoto)
+                }
             }
             if (marks.isEmpty()) {
                 Text("还没有设置厂/检年份，请到设置里添加。")
@@ -347,6 +440,38 @@ private fun MarkCounter(
                     FilledTonalIconButton(onClick = { counts[mark] = qty + 1 }) {
                         Icon(Icons.Default.Add, "加1")
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoSlotButton(
+    label: String,
+    photoPath: String,
+    onTakePhoto: () -> Unit
+) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onTakePhoto, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (photoPath.isNotBlank()) "$label（已拍，可重拍）" else label, fontSize = 17.sp)
+            }
+            if (photoPath.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AsyncImage(
+                        model = File(photoPath),
+                        contentDescription = label,
+                        modifier = Modifier.size(width = 110.dp, height = 82.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                    Text(
+                        File(photoPath).name,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

@@ -22,6 +22,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceIdentityManager
+import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.local.LocalServerBootstrap
 import com.example.myproductivityapp.data.local.ServerConfigManager
 import com.example.myproductivityapp.data.remote.LocalServerClient
@@ -144,6 +145,30 @@ private fun V2IdentityGate(
     val manager = remember { DeviceIdentityManager(context) }
     var identity by remember { mutableStateOf(manager.load()) }
 
+    // 身份校验：DRIVER 的稳定 remoteId 缺失/失效时自动修复或重新绑定
+    LaunchedEffect(identity) {
+        val current = identity ?: return@LaunchedEffect
+        if (current.role != DeviceRole.DRIVER) return@LaunchedEffect
+        if (current.employeeRemoteId.isNotBlank()) return@LaunchedEffect
+
+        val db = AppDatabase.getDatabase(context)
+        val employees = db.employeeDao().getAllEmployeesOnce()
+        // 仅当同名且唯一、且该员工已有稳定远端 ID 时才自动补绑，避免名字模糊匹配串人
+        val matches = employees.filter { it.name == current.employeeName && it.firestoreId.isNotBlank() }
+        if (matches.size == 1) {
+            val fixed = current.copy(
+                employeeId = matches[0].id,
+                employeeRemoteId = matches[0].firestoreId
+            )
+            manager.save(fixed)
+            identity = fixed
+        } else {
+            // 无法安全匹配 → 清除旧身份，让用户重新选
+            manager.clear()
+            identity = null
+        }
+    }
+
     val current = identity
     if (current == null) {
         V2IdentitySetupScreen(client = client) { selected ->
@@ -199,9 +224,21 @@ fun V2MainScreen(
     val title = when (currentRoute) {
         "record" -> "久隆站助手"
         "tasks" -> "待办"
-        "ledger" -> "账本"
+        "ledger" -> "统计"
         "settings" -> "设置"
         else -> "久隆站助手"
+    }
+
+    val isDriver = identity.role == DeviceRole.DRIVER
+
+    // 路由保护：送气工禁止进入设置页（无论旧导航状态还是其他入口）
+    LaunchedEffect(currentRoute, isDriver) {
+        if (isDriver && currentRoute == "settings") {
+            navController.navigate("tasks") {
+                popUpTo("tasks") { inclusive = false }
+                launchSingleTop = true
+            }
+        }
     }
 
     Scaffold(
@@ -212,7 +249,8 @@ fun V2MainScreen(
                     if (currentRoute == "settings") {
                         TextButton(onClick = onChangeIdentity) { Text("换身份") }
                         TextButton(onClick = onChangeServer) { Text("服务器") }
-                    } else {
+                    } else if (!isDriver) {
+                        // 只有营业员/站长能看到设置入口
                         IconButton(onClick = { navController.navigate("settings") }) {
                             Icon(Icons.Default.Settings, contentDescription = "设置")
                         }
@@ -223,17 +261,19 @@ fun V2MainScreen(
         bottomBar = {
             if (currentRoute != "settings") {
                 NavigationBar {
-                    NavigationBarItem(
-                        selected = currentRoute == "record",
-                        onClick = {
-                            navController.navigate("record") {
-                                popUpTo("record") { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.EditNote, contentDescription = "记账") },
-                        label = { Text("记账") }
-                    )
+                    if (!isDriver) {
+                        NavigationBarItem(
+                            selected = currentRoute == "record",
+                            onClick = {
+                                navController.navigate("record") {
+                                    popUpTo("record") { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            icon = { Icon(Icons.Default.EditNote, contentDescription = "记账") },
+                            label = { Text("记账") }
+                        )
+                    }
                     NavigationBarItem(
                         selected = currentRoute == "tasks",
                         onClick = { navController.navigate("tasks") { launchSingleTop = true } },
@@ -243,8 +283,8 @@ fun V2MainScreen(
                     NavigationBarItem(
                         selected = currentRoute == "ledger",
                         onClick = { navController.navigate("ledger") { launchSingleTop = true } },
-                        icon = { Icon(Icons.Default.MenuBook, contentDescription = "账本") },
-                        label = { Text("账本") }
+                        icon = { Icon(Icons.Default.MenuBook, contentDescription = "统计") },
+                        label = { Text("统计") }
                     )
                 }
             }
@@ -252,12 +292,12 @@ fun V2MainScreen(
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = "record",
+            startDestination = if (isDriver) "tasks" else "record",
             modifier = Modifier.padding(padding)
         ) {
             composable("record") { V2RecordScreen() }
             composable("tasks") { V2TasksScreen(identity) }
-            composable("ledger") { V2LedgerScreen() }
+            composable("ledger") { V2LedgerScreen(identity) }
             composable("settings") { SettingsScreen() }
         }
     }

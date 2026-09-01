@@ -11,18 +11,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myproductivityapp.data.AppDatabase
+import com.example.myproductivityapp.data.local.DeviceIdentity
+import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.DeliveryRecord
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun V2LedgerScreen() {
+fun V2LedgerScreen(identity: DeviceIdentity) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     var records by remember { mutableStateOf<List<DeliveryRecord>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        db.deliveryRecordDao().getAllRecords().collect { records = it }
+        db.deliveryRecordDao().getAllRecords().collect { all ->
+            records = if (identity.role == DeviceRole.DRIVER) {
+                // 送气工只统计自己的记录：优先稳定 remote id，老数据无 remote id 时用姓名兜底
+                all.filter {
+                    (identity.employeeRemoteId.isNotBlank() && it.employeeFirestoreId == identity.employeeRemoteId) ||
+                        (identity.employeeRemoteId.isBlank() && it.employeeName == identity.employeeName)
+                }
+            } else {
+                // 营业员/站长看全站
+                all
+            }
+        }
     }
 
     val calendar = remember { Calendar.getInstance() }
@@ -48,8 +61,11 @@ fun V2LedgerScreen() {
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
-            Text("账本", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("先看今天，再看欠款。", style = MaterialTheme.typography.bodyLarge)
+            Text("统计", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (identity.role == DeviceRole.DRIVER) "只看你自己的记录。" else "先看今天，再看欠款。",
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
 
         item {

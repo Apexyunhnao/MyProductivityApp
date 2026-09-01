@@ -50,11 +50,9 @@ fun V2TasksScreen(identity: DeviceIdentity) {
             // 送气员只看自己的未完成待办（服务器稳定 ID，跨手机不串人）
             db.deliveryTaskDao().observeOpenTasksForEmployeeRemote(remoteId).collect { tasks = it }
         } else if (isDriver) {
-            // 兼容旧绑定：换身份重新绑定一次后会使用稳定 remote id
-            val localId = identity.employeeId
-            if (localId != null) {
-                db.deliveryTaskDao().observeOpenTasksForEmployee(localId).collect { tasks = it }
-            }
+            // remoteId 缺失时不清空列表，靠 V2IdentityGate 自动修复或重新绑定；
+            // 这里不再用本地 Long ID 兜底——跨手机本地自增 ID 不一致，会导致收不到营业员派单。
+            tasks = emptyList()
         } else {
             // 营业员/站长看全站
             db.deliveryTaskDao().observeOpenTasks().collect { tasks = it }

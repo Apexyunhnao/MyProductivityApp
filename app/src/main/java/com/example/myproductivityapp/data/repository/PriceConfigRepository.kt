@@ -47,9 +47,16 @@ class PriceConfigRepository(
 
     suspend fun syncFromCloud() = withContext(Dispatchers.IO) {
         val docs = client.list(table)
-        for (obj in docs) {
+        // 旧版修改价格不带 firestoreId 曾导致服务器出现同 bottleType 多条重复记录。
+        // 拉取时按 bottleType 只保留 updatedAt 最新的一条，避免旧记录按插入顺序覆盖新价格。
+        val latestByType = docs
+            .filter { (it["id"] ?: it["_id"] ?: "").toString().isNotBlank() }
+            .groupBy { (it["bottleType"] as? String) ?: "" }
+            .mapValues { (_, items) ->
+                items.maxByOrNull { (it["updatedAt"] as? Number)?.toLong() ?: 0L } ?: items.first()
+            }
+        for ((_, obj) in latestByType) {
             val remoteId = (obj["id"] ?: obj["_id"] ?: "").toString()
-            if (remoteId.isBlank()) continue
             val existing = dao.getByFirestoreId(remoteId)
             val remoteUpdatedAt = (obj["updatedAt"] as? Number)?.toLong() ?: 0
             if (existing != null && existing.updatedAt >= remoteUpdatedAt) continue

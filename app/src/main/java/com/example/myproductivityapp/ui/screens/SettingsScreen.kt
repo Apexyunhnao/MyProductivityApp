@@ -325,11 +325,16 @@ fun SettingsScreen() {
             },
             onConfirm = { newPrice ->
                 scope.launch {
+                    // 必须带上现有 firestoreId，否则 REPLACE 会把远端 ID 清空、
+                    // 保存走 add() 在服务器新增重复记录，下次同步又拉回旧价格（修改无效的根因）
+                    val current = priceConfigs.find { it.bottleType == editingPriceType }
                     priceConfigRepo.save(
                         PriceConfig(
                             bottleType = editingPriceType!!,
                             price = newPrice,
-                            lastUpdated = System.currentTimeMillis()
+                            lastUpdated = System.currentTimeMillis(),
+                            firestoreId = current?.firestoreId ?: "",
+                            updatedAt = System.currentTimeMillis()
                         )
                     )
                     showPriceDialog = false
@@ -498,7 +503,8 @@ fun EditPriceDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit
 ) {
-    var price by remember { mutableStateOf(currentPrice.toString()) }
+    // remember 必须以 currentPrice/bottleType 为 key：否则 dialog 复用时残留上次输入值（表现为编辑值变 0/旧值）
+    var price by remember(bottleType, currentPrice) { mutableStateOf(currentPrice.toString()) }
     val type = BottleType.values().find { it.name == bottleType }
     val displayName = type?.displayName ?: bottleType
 
