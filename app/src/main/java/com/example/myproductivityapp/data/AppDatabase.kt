@@ -22,7 +22,7 @@ import com.example.myproductivityapp.data.model.*
         Policy::class,
         StationDuty::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -37,8 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stationDutyDao(): StationDutyDao
 
     companion object {
-        @Volatile
-        private var INSTANCE: AppDatabase? = null
+        @Volatile private var INSTANCE: AppDatabase? = null
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
@@ -46,29 +45,14 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE delivery_records ADD COLUMN wechatAmount REAL NOT NULL DEFAULT 0.0")
                 database.execSQL("ALTER TABLE delivery_records ADD COLUMN debtAmount REAL NOT NULL DEFAULT 0.0")
                 database.execSQL("ALTER TABLE delivery_records ADD COLUMN yearInfo TEXT NOT NULL DEFAULT ''")
-                database.execSQL("""
-                    CREATE TABLE IF NOT EXISTS bottle_years (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        year TEXT NOT NULL,
-                        type TEXT NOT NULL
-                    )
-                """)
+                database.execSQL("CREATE TABLE IF NOT EXISTS bottle_years (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, year TEXT NOT NULL, type TEXT NOT NULL)")
             }
         }
 
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("""
-                    CREATE TABLE IF NOT EXISTS price_config_new (
-                        bottleType TEXT PRIMARY KEY NOT NULL,
-                        price INTEGER NOT NULL,
-                        lastUpdated INTEGER NOT NULL
-                    )
-                """)
-                database.execSQL("""
-                    INSERT INTO price_config_new (bottleType, price, lastUpdated)
-                    SELECT bottleType, CAST(price AS INTEGER), lastUpdated FROM price_config
-                """)
+                database.execSQL("CREATE TABLE IF NOT EXISTS price_config_new (bottleType TEXT PRIMARY KEY NOT NULL, price INTEGER NOT NULL, lastUpdated INTEGER NOT NULL)")
+                database.execSQL("INSERT INTO price_config_new (bottleType, price, lastUpdated) SELECT bottleType, CAST(price AS INTEGER), lastUpdated FROM price_config")
                 database.execSQL("DROP TABLE price_config")
                 database.execSQL("ALTER TABLE price_config_new RENAME TO price_config")
             }
@@ -111,112 +95,76 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS delivery_tasks (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        customerName TEXT NOT NULL,
-                        phoneNumber TEXT NOT NULL,
-                        address TEXT NOT NULL,
-                        areaTag TEXT NOT NULL,
-                        taskType TEXT NOT NULL,
-                        deliveryQuantity INTEGER NOT NULL,
-                        pickupQuantity INTEGER NOT NULL,
-                        assignedEmployeeId INTEGER,
-                        assignedEmployeeName TEXT NOT NULL,
-                        paymentStatus TEXT NOT NULL,
-                        amountToCollect REAL NOT NULL,
-                        amountPaid REAL NOT NULL,
-                        debtReminder REAL NOT NULL,
-                        priority TEXT NOT NULL,
-                        dueLabel TEXT NOT NULL,
-                        note TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        createdByEmployeeId INTEGER,
-                        createdByName TEXT NOT NULL,
-                        createdAt INTEGER NOT NULL,
-                        completedAt INTEGER,
-                        firestoreId TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
+                        customerName TEXT NOT NULL, phoneNumber TEXT NOT NULL,
+                        address TEXT NOT NULL, areaTag TEXT NOT NULL,
+                        taskType TEXT NOT NULL, deliveryQuantity INTEGER NOT NULL,
+                        pickupQuantity INTEGER NOT NULL, assignedEmployeeId INTEGER,
+                        assignedEmployeeName TEXT NOT NULL, paymentStatus TEXT NOT NULL,
+                        amountToCollect REAL NOT NULL, amountPaid REAL NOT NULL,
+                        debtReminder REAL NOT NULL, priority TEXT NOT NULL,
+                        dueLabel TEXT NOT NULL, note TEXT NOT NULL, status TEXT NOT NULL,
+                        createdByEmployeeId INTEGER, createdByName TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL, completedAt INTEGER,
+                        firestoreId TEXT NOT NULL, updatedAt INTEGER NOT NULL,
                         synced INTEGER NOT NULL
                     )
                 """)
-
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS bottle_details (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        deliveryRecordId INTEGER NOT NULL,
-                        bottleType TEXT NOT NULL,
-                        quantity INTEGER NOT NULL,
-                        productionMark TEXT NOT NULL,
-                        bottleCondition TEXT NOT NULL,
-                        customerName TEXT NOT NULL,
-                        unitPrice REAL NOT NULL,
-                        policyId INTEGER,
-                        note TEXT NOT NULL,
-                        firestoreId TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
+                        deliveryRecordId INTEGER NOT NULL, bottleType TEXT NOT NULL,
+                        quantity INTEGER NOT NULL, productionMark TEXT NOT NULL,
+                        bottleCondition TEXT NOT NULL, customerName TEXT NOT NULL,
+                        unitPrice REAL NOT NULL, policyId INTEGER, note TEXT NOT NULL,
+                        firestoreId TEXT NOT NULL, updatedAt INTEGER NOT NULL,
                         synced INTEGER NOT NULL
                     )
                 """)
-
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS products (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        name TEXT NOT NULL,
-                        unit TEXT NOT NULL,
-                        defaultPrice REAL NOT NULL,
-                        enabled INTEGER NOT NULL,
-                        sortOrder INTEGER NOT NULL,
-                        firestoreId TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
+                        name TEXT NOT NULL, unit TEXT NOT NULL, defaultPrice REAL NOT NULL,
+                        enabled INTEGER NOT NULL, sortOrder INTEGER NOT NULL,
+                        firestoreId TEXT NOT NULL, updatedAt INTEGER NOT NULL,
                         synced INTEGER NOT NULL
                     )
                 """)
-
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS product_sale_items (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        deliveryRecordId INTEGER NOT NULL,
-                        productId INTEGER,
-                        productName TEXT NOT NULL,
-                        quantity REAL NOT NULL,
-                        unit TEXT NOT NULL,
-                        unitPrice REAL NOT NULL,
-                        firestoreId TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
+                        deliveryRecordId INTEGER NOT NULL, productId INTEGER,
+                        productName TEXT NOT NULL, quantity REAL NOT NULL,
+                        unit TEXT NOT NULL, unitPrice REAL NOT NULL,
+                        firestoreId TEXT NOT NULL, updatedAt INTEGER NOT NULL,
                         synced INTEGER NOT NULL
                     )
                 """)
-
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS policies (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        name TEXT NOT NULL,
-                        policyType TEXT NOT NULL,
-                        amount REAL NOT NULL,
-                        conditionText TEXT NOT NULL,
-                        startAt INTEGER,
-                        endAt INTEGER,
-                        enabled INTEGER NOT NULL,
-                        firestoreId TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
-                        synced INTEGER NOT NULL
+                        name TEXT NOT NULL, policyType TEXT NOT NULL, amount REAL NOT NULL,
+                        conditionText TEXT NOT NULL, startAt INTEGER, endAt INTEGER,
+                        enabled INTEGER NOT NULL, firestoreId TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL, synced INTEGER NOT NULL
                     )
                 """)
-
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS station_duties (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        dutyType TEXT NOT NULL,
-                        dutyDate INTEGER NOT NULL,
-                        assignedEmployeeId INTEGER NOT NULL,
-                        assignedEmployeeName TEXT NOT NULL,
-                        expectedReturnAt INTEGER,
-                        status TEXT NOT NULL,
-                        swapWithEmployeeId INTEGER,
-                        note TEXT NOT NULL,
-                        firestoreId TEXT NOT NULL,
-                        updatedAt INTEGER NOT NULL,
+                        dutyType TEXT NOT NULL, dutyDate INTEGER NOT NULL,
+                        assignedEmployeeId INTEGER NOT NULL, assignedEmployeeName TEXT NOT NULL,
+                        expectedReturnAt INTEGER, status TEXT NOT NULL,
+                        swapWithEmployeeId INTEGER, note TEXT NOT NULL,
+                        firestoreId TEXT NOT NULL, updatedAt INTEGER NOT NULL,
                         synced INTEGER NOT NULL
                     )
                 """)
+            }
+        }
+
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE delivery_tasks ADD COLUMN assignedEmployeeRemoteId TEXT NOT NULL DEFAULT ''")
             }
         }
 
@@ -226,16 +174,15 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "gas_station_database"
-                )
-                    .addMigrations(
-                        MIGRATION_1_2,
-                        MIGRATION_2_3,
-                        MIGRATION_3_4,
-                        MIGRATION_4_5,
-                        MIGRATION_5_6,
-                        MIGRATION_6_7
-                    )
-                    .build()
+                ).addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                    MIGRATION_7_8
+                ).build()
                 INSTANCE = instance
                 instance
             }
