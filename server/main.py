@@ -128,22 +128,37 @@ def create_object(resource: str, body: dict[str, Any]) -> dict[str, str]:
 
 @app.patch("/api/{resource}/{object_id}", dependencies=[Depends(require_key)])
 def update_object(resource: str, object_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """
+    Update-or-create by explicit id.
+
+    This intentionally accepts an id that does not yet exist so an old phone can carry
+    its previous CloudBase remote id into the new local server. Multiple old phones then
+    converge on the same object instead of duplicating the same historical records.
+    """
     resource = check_resource(resource)
     with connect() as con:
         row = con.execute(
             "SELECT data FROM sync_objects WHERE resource = ? AND id = ?",
             (resource, object_id),
         ).fetchone()
+
         if row is None:
-            raise HTTPException(status_code=404, detail="object not found")
-        payload = json.loads(row["data"])
-        payload.update(body)
-        updated_at = int(payload.get("updatedAt") or now_ms())
-        payload["updatedAt"] = updated_at
-        con.execute(
-            "UPDATE sync_objects SET data = ?, updated_at = ? WHERE resource = ? AND id = ?",
-            (json.dumps(payload, ensure_ascii=False), updated_at, resource, object_id),
-        )
+            payload = dict(body)
+            updated_at = int(payload.get("updatedAt") or now_ms())
+            payload["updatedAt"] = updated_at
+            con.execute(
+                "INSERT INTO sync_objects(resource, id, data, updated_at) VALUES(?, ?, ?, ?)",
+                (resource, object_id, json.dumps(payload, ensure_ascii=False), updated_at),
+            )
+        else:
+            payload = json.loads(row["data"])
+            payload.update(body)
+            updated_at = int(payload.get("updatedAt") or now_ms())
+            payload["updatedAt"] = updated_at
+            con.execute(
+                "UPDATE sync_objects SET data = ?, updated_at = ? WHERE resource = ? AND id = ?",
+                (json.dumps(payload, ensure_ascii=False), updated_at, resource, object_id),
+            )
     return {"ok": True, "id": object_id}
 
 
