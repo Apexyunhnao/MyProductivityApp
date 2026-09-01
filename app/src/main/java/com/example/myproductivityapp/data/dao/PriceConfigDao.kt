@@ -26,4 +26,7 @@ interface PriceConfigDao {
 
     @Query("SELECT * FROM price_config WHERE synced = 0")
     suspend fun getUnsynced(): List<PriceConfig>
+
+    @Query("UPDATE price_config SET firestoreId = '', synced = 0")
+    suspend fun resetRemoteSyncForLocalServer()
 }
