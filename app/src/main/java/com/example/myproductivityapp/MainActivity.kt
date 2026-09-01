@@ -5,18 +5,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.myproductivityapp.auth.AuthManager
 import com.example.myproductivityapp.auth.AuthState
 import com.example.myproductivityapp.auth.AuthViewModel
 import com.example.myproductivityapp.data.AppDatabase
@@ -63,26 +63,20 @@ fun AppEntryPoint() {
                 }
             }
         }
-        is AuthState.LoggedOut -> {
-            LoginScreen(viewModel = viewModel)
-        }
-        is AuthState.LoggedIn -> {
-            MainScreen(client = client)
-        }
+        is AuthState.LoggedOut -> LoginScreen(viewModel = viewModel)
+        is AuthState.LoggedIn -> V2MainScreen(client = client)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(client: CloudBaseClient) {
+fun V2MainScreen(client: CloudBaseClient) {
     val context = LocalContext.current
     val navController = rememberNavController()
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route ?: "record"
 
-    val authManager = remember { AuthManager(client) }
-
-    // 同步管理器
+    // 现有四类数据仍沿用原来的离线优先同步；V2 新表的云同步在后续阶段补齐。
     LaunchedEffect(Unit) {
         val db = AppDatabase.getDatabase(context)
         val employeeRepo = EmployeeRepository(db.employeeDao(), client)
@@ -96,47 +90,63 @@ fun MainScreen(client: CloudBaseClient) {
         sync.startFlush()
     }
 
+    val title = when (currentRoute) {
+        "record" -> "久隆站助手"
+        "tasks" -> "待办"
+        "ledger" -> "账本"
+        "settings" -> "设置"
+        else -> "久隆站助手"
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(when (currentRoute) {
-                    "add_record" -> "配送记录"; "statistics" -> "统计报表"
-                    "settings" -> "系统设置"; else -> "煤气站配送管理"
-                }) },
+                title = { Text(title) },
                 actions = {
-                    IconButton(onClick = { authManager.signOut() }) {
-                        Icon(Icons.Default.ExitToApp, "退出")
+                    IconButton(onClick = { navController.navigate("settings") }) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                }
             )
         },
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.Add, "记录") }, label = { Text("记录") },
-                    selected = currentRoute == "add_record",
-                    onClick = { navController.navigate("add_record") }
-                )
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.DateRange, "统计") }, label = { Text("统计") },
-                    selected = currentRoute == "statistics",
-                    onClick = { navController.navigate("statistics") }
-                )
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.Settings, "设置") }, label = { Text("设置") },
-                    selected = currentRoute == "settings",
-                    onClick = { navController.navigate("settings") }
-                )
+            if (currentRoute != "settings") {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentRoute == "record",
+                        onClick = {
+                            navController.navigate("record") {
+                                popUpTo("record") { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.EditNote, contentDescription = "记账") },
+                        label = { Text("记账") }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == "tasks",
+                        onClick = { navController.navigate("tasks") { launchSingleTop = true } },
+                        icon = { Icon(Icons.Default.Assignment, contentDescription = "待办") },
+                        label = { Text("待办") }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == "ledger",
+                        onClick = { navController.navigate("ledger") { launchSingleTop = true } },
+                        icon = { Icon(Icons.Default.MenuBook, contentDescription = "账本") },
+                        label = { Text("账本") }
+                    )
+                }
             }
         }
     ) { padding ->
-        NavHost(navController, startDestination = "add_record", modifier = Modifier.padding(padding)) {
-            composable("add_record") { AddRecordScreen(navController = navController) }
-            composable("statistics") { StatisticsScreen() }
+        NavHost(
+            navController = navController,
+            startDestination = "record",
+            modifier = Modifier.padding(padding)
+        ) {
+            composable("record") { V2RecordScreen() }
+            composable("tasks") { V2TasksScreen() }
+            composable("ledger") { V2LedgerScreen() }
             composable("settings") { SettingsScreen() }
         }
     }
