@@ -1,15 +1,15 @@
 package com.example.myproductivityapp.data.repository
 
-import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
 import com.example.myproductivityapp.data.dao.DeliveryRecordDao
 import com.example.myproductivityapp.data.model.DeliveryRecord
+import com.example.myproductivityapp.data.remote.RemoteDataClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 class DeliveryRecordRepository(
     private val dao: DeliveryRecordDao,
-    private val client: CloudBaseClient
+    private val client: RemoteDataClient
 ) {
     private val table = "delivery_records"
 
@@ -24,9 +24,10 @@ class DeliveryRecordRepository(
             val data = recordToMap(entity)
             if (entity.firestoreId.isNotBlank()) {
                 client.update(table, entity.firestoreId, data)
+                dao.insertRecord(entity.copy(id = localId, synced = true))
             } else {
-                val fsId = client.add(table, data)
-                dao.insertRecord(entity.copy(id = localId, firestoreId = fsId, synced = true))
+                val remoteId = client.add(table, data)
+                dao.insertRecord(entity.copy(id = localId, firestoreId = remoteId, synced = remoteId.isNotBlank()))
             }
         } catch (e: Exception) {
             android.util.Log.e("Repo", "save failed", e)
@@ -43,9 +44,10 @@ class DeliveryRecordRepository(
             val data = recordToMap(entity)
             if (entity.firestoreId.isNotBlank()) {
                 client.update(table, entity.firestoreId, data)
+                dao.updateRecord(entity.copy(synced = true))
             } else {
-                val fsId = client.add(table, data)
-                dao.updateRecord(entity.copy(firestoreId = fsId, synced = true))
+                val remoteId = client.add(table, data)
+                dao.updateRecord(entity.copy(firestoreId = remoteId, synced = remoteId.isNotBlank()))
             }
         } catch (_: Exception) { }
     }
@@ -60,15 +62,15 @@ class DeliveryRecordRepository(
     suspend fun syncFromCloud() = withContext(Dispatchers.IO) {
         val docs = client.list(table)
         for (obj in docs) {
-            val fsId = (obj["id"] ?: obj["_id"] ?: "").toString()
-            if (fsId.isBlank()) continue
-            val existing = dao.getByFirestoreId(fsId)
+            val remoteId = (obj["id"] ?: obj["_id"] ?: "").toString()
+            if (remoteId.isBlank()) continue
+            val existing = dao.getByFirestoreId(remoteId)
             val remoteUpdatedAt = (obj["updatedAt"] as? Number)?.toLong() ?: 0
             if (existing != null && existing.updatedAt >= remoteUpdatedAt) continue
 
             dao.insertRecord(DeliveryRecord(
                 id = existing?.id ?: 0,
-                employeeId = existing?.employeeId ?: 0,
+                employeeId = (obj["employeeId"] as? Number)?.toLong() ?: existing?.employeeId ?: 0,
                 employeeName = (obj["employeeName"] as? String) ?: "",
                 bottleType = (obj["bottleType"] as? String) ?: "",
                 quantity = (obj["quantity"] as? Number)?.toInt() ?: 0,
@@ -81,7 +83,7 @@ class DeliveryRecordRepository(
                 date = (obj["date"] as? Number)?.toLong() ?: 0,
                 notes = (obj["notes"] as? String) ?: "",
                 imagePath = (obj["imagePath"] as? String) ?: "",
-                firestoreId = fsId,
+                firestoreId = remoteId,
                 employeeFirestoreId = (obj["employeeFirestoreId"] as? String) ?: "",
                 imageUrl = (obj["imageUrl"] as? String) ?: "",
                 updatedAt = remoteUpdatedAt,
@@ -99,14 +101,23 @@ class DeliveryRecordRepository(
     }
 
     private fun recordToMap(r: DeliveryRecord) = mapOf<String, Any?>(
-        "employeeId" to r.employeeId, "employeeName" to r.employeeName,
-        "bottleType" to r.bottleType, "quantity" to r.quantity,
-        "pricePerUnit" to r.pricePerUnit, "totalAmount" to r.totalAmount,
-        "cashAmount" to r.cashAmount, "wechatAmount" to r.wechatAmount,
-        "debtAmount" to r.debtAmount, "yearInfo" to r.yearInfo,
-        "date" to r.date, "notes" to r.notes, "imagePath" to r.imagePath,
+        "employeeId" to r.employeeId,
+        "employeeName" to r.employeeName,
+        "bottleType" to r.bottleType,
+        "quantity" to r.quantity,
+        "pricePerUnit" to r.pricePerUnit,
+        "totalAmount" to r.totalAmount,
+        "cashAmount" to r.cashAmount,
+        "wechatAmount" to r.wechatAmount,
+        "debtAmount" to r.debtAmount,
+        "yearInfo" to r.yearInfo,
+        "date" to r.date,
+        "notes" to r.notes,
+        "imagePath" to r.imagePath,
         "employeeFirestoreId" to r.employeeFirestoreId,
-        "imageUrl" to r.imageUrl, "updatedAt" to r.updatedAt,
-        "exchangeStatus" to r.exchangeStatus, "returnedYear" to r.returnedYear
+        "imageUrl" to r.imageUrl,
+        "updatedAt" to r.updatedAt,
+        "exchangeStatus" to r.exchangeStatus,
+        "returnedYear" to r.returnedYear
     )
 }
