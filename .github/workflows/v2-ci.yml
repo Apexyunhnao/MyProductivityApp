@@ -1,0 +1,49 @@
+name: V2 CI
+
+on:
+  push:
+    branches: [v2-redesign]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: Install server dependencies
+        run: pip install -r server/requirements.txt
+      - name: Start server and run smoke test
+        run: |
+          cd server
+          GAS_STATION_API_KEY=gas-station-local python -m uvicorn main:app --host 127.0.0.1 --port 8000 > server.log 2>&1 &
+          SERVER_PID=$!
+          sleep 3
+          python smoke_test.py
+          kill $SERVER_PID
