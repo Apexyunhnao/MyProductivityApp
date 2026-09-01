@@ -45,6 +45,6 @@ interface DeliveryRecordDao {
     @Query("SELECT * FROM delivery_records WHERE exchangeStatus = :status ORDER BY date DESC")
     suspend fun getExchangeRecordsByStatusOnce(status: String): List<DeliveryRecord>
 
-    @Query("UPDATE delivery_records SET firestoreId = '', employeeFirestoreId = '', synced = 0")
+    @Query("UPDATE delivery_records SET synced = 0")
     suspend fun resetRemoteSyncForLocalServer()
 }
