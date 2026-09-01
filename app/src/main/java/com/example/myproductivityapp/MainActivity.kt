@@ -20,7 +20,6 @@ import androidx.navigation.compose.rememberNavController
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceIdentityManager
-import com.example.myproductivityapp.data.local.ServerConfig
 import com.example.myproductivityapp.data.local.ServerConfigManager
 import com.example.myproductivityapp.data.remote.LocalServerClient
 import com.example.myproductivityapp.data.remote.RemoteDataClient
@@ -67,9 +66,8 @@ private fun V2AppRoot() {
     val client = remember(config.baseUrl, config.apiKey) {
         LocalServerClient(config.baseUrl, config.apiKey)
     }
-    SideEffect {
-        MainActivity.cloudClient = client
-    }
+    // 旧页面/旧 ViewModel 仍从这个兼容入口拿 client；必须在子页面组合前就赋值。
+    MainActivity.cloudClient = client
 
     V2IdentityGate(
         client = client,
