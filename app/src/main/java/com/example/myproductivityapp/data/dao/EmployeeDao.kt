@@ -29,4 +29,7 @@ interface EmployeeDao {
 
     @Query("SELECT * FROM employees WHERE synced = 0")
     suspend fun getUnsynced(): List<Employee>
+
+    @Query("UPDATE employees SET firestoreId = '', synced = 0")
+    suspend fun resetRemoteSyncForLocalServer()
 }
