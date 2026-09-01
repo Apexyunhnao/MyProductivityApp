@@ -6,7 +6,8 @@ class SyncManager(
     private val employeeRepo: EmployeeRepository,
     private val deliveryRecordRepo: DeliveryRecordRepository,
     private val priceConfigRepo: PriceConfigRepository,
-    private val bottleYearRepo: BottleYearRepository
+    private val bottleYearRepo: BottleYearRepository,
+    private val deliveryTaskRepo: DeliveryTaskRepository? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -16,7 +17,7 @@ class SyncManager(
             deliveryRecordRepo.syncFromCloud()
             priceConfigRepo.syncFromCloud()
             bottleYearRepo.syncFromCloud()
-
+            deliveryTaskRepo?.syncFromCloud()
             flushAll()
         } catch (_: Exception) { }
     }
@@ -29,6 +30,7 @@ class SyncManager(
                 deliveryRecordRepo.syncFromCloud()
                 priceConfigRepo.syncFromCloud()
                 bottleYearRepo.syncFromCloud()
+                deliveryTaskRepo?.syncFromCloud()
             } catch (_: Exception) { }
         }
     }
@@ -45,6 +47,7 @@ class SyncManager(
         deliveryRecordRepo.pushUnsynced()
         priceConfigRepo.pushUnsynced()
         bottleYearRepo.pushUnsynced()
+        deliveryTaskRepo?.pushUnsynced()
     }
 
     fun destroy() { scope.cancel() }
