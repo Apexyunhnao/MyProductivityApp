@@ -1,6 +1,8 @@
 package com.example.myproductivityapp.data.remote
 
 import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,8 +21,8 @@ class LocalServerClient(
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun health(): Boolean {
-        return try {
+    override suspend fun health(): Boolean = withContext(Dispatchers.IO) {
+        try {
             val req = authorized(Request.Builder().url("$base/api-meta/ping")).get().build()
             client.newCall(req).execute().use { it.isSuccessful }
         } catch (_: Exception) {
@@ -28,38 +30,40 @@ class LocalServerClient(
         }
     }
 
-    override suspend fun list(table: String): List<Map<String, Any?>> {
+    override suspend fun list(table: String): List<Map<String, Any?>> = withContext(Dispatchers.IO) {
         val req = authorized(Request.Builder().url("$base/api/$table")).get().build()
         val text = execute(req)
         val parsed = gson.fromJson(text, Any::class.java)
-        return (parsed as? List<*>)?.mapNotNull { item ->
+        (parsed as? List<*>)?.mapNotNull { item ->
             (item as? Map<*, *>)?.entries?.associate { it.key.toString() to it.value }
         } ?: emptyList()
     }
 
-    override suspend fun add(table: String, data: Map<String, Any?>): String {
+    override suspend fun add(table: String, data: Map<String, Any?>): String = withContext(Dispatchers.IO) {
         val body = gson.toJson(data).toRequestBody(JSON)
         val req = authorized(Request.Builder().url("$base/api/$table"))
             .post(body)
             .build()
         val text = execute(req)
-        val map = gson.fromJson(text, Map::class.java) as? Map<*, *> ?: return ""
-        return (map["id"] ?: "").toString()
+        val map = gson.fromJson(text, Map::class.java) as? Map<*, *> ?: return@withContext ""
+        (map["id"] ?: "").toString()
     }
 
-    override suspend fun update(table: String, docId: String, data: Map<String, Any?>) {
+    override suspend fun update(table: String, docId: String, data: Map<String, Any?>) = withContext(Dispatchers.IO) {
         val body = gson.toJson(data).toRequestBody(JSON)
         val req = authorized(Request.Builder().url("$base/api/$table/$docId"))
             .patch(body)
             .build()
         execute(req)
+        Unit
     }
 
-    override suspend fun delete(table: String, docId: String) {
+    override suspend fun delete(table: String, docId: String) = withContext(Dispatchers.IO) {
         val req = authorized(Request.Builder().url("$base/api/$table/$docId"))
             .delete()
             .build()
         execute(req)
+        Unit
     }
 
     private fun authorized(builder: Request.Builder): Request.Builder =
