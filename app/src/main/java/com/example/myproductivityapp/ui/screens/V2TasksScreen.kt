@@ -2,6 +2,7 @@ package com.example.myproductivityapp.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -16,7 +17,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.local.DeviceIdentity
+import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.DeliveryTask
+import com.example.myproductivityapp.data.model.Employee
 import com.example.myproductivityapp.data.model.PaymentStatus
 import com.example.myproductivityapp.data.model.TaskPriority
 import com.example.myproductivityapp.data.model.TaskStatus
@@ -24,9 +27,10 @@ import com.example.myproductivityapp.data.model.TaskType
 import kotlinx.coroutines.launch
 
 /**
- * V2 待办：普通待办只记客户姓名。
- * 5 人小站共享同一份未完成列表，谁处理完谁点“完成”。
- * 数据模型仍保留地址/付款/数量等字段，以兼容已有特殊任务。
+ * V2 待办：录入极简，只记客户姓名 + 派给谁。
+ * - 营业员/站长：看全站未完成待办；建待办必须选一个送气员。
+ * - 送气员：只看派给自己的未完成待办；自己记的自动归自己。
+ * 底层字段保留（兼容旧特殊任务），新建普通待办只写默认值。
  */
 @Composable
 fun V2TasksScreen(identity: DeviceIdentity) {
@@ -35,11 +39,29 @@ fun V2TasksScreen(identity: DeviceIdentity) {
     val scope = rememberCoroutineScope()
 
     var tasks by remember { mutableStateOf<List<DeliveryTask>>(emptyList()) }
+    var employees by remember { mutableStateOf<List<Employee>>(emptyList()) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    // 人少且彼此熟悉客户：所有人共享同一份未完成待办，不再要求分配负责人。
+    val isDriver = identity.role == DeviceRole.DRIVER
+
+    LaunchedEffect(identity) {
+        val remoteId = identity.employeeRemoteId
+        if (isDriver && remoteId.isNotBlank()) {
+            // 送气员只看自己的未完成待办（服务器稳定 ID，跨手机不串人）
+            db.deliveryTaskDao().observeOpenTasksForEmployeeRemote(remoteId).collect { tasks = it }
+        } else if (isDriver) {
+            // 兼容旧绑定：换身份重新绑定一次后会使用稳定 remote id
+            val localId = identity.employeeId
+            if (localId != null) {
+                db.deliveryTaskDao().observeOpenTasksForEmployee(localId).collect { tasks = it }
+            }
+        } else {
+            // 营业员/站长看全站
+            db.deliveryTaskDao().observeOpenTasks().collect { tasks = it }
+        }
+    }
     LaunchedEffect(Unit) {
-        db.deliveryTaskDao().observeOpenTasks().collect { tasks = it }
+        db.employeeDao().getAllEmployees().collect { employees = it }
     }
 
     Scaffold(
@@ -58,7 +80,11 @@ fun V2TasksScreen(identity: DeviceIdentity) {
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Text("待办", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("只记客户名字，谁送完谁点完成。", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (isDriver) "${identity.employeeName}要做的事情"
+                else "全站还没做完的事情",
+                style = MaterialTheme.typography.bodyLarge
+            )
             Spacer(Modifier.height(12.dp))
 
             if (tasks.isEmpty()) {
@@ -76,7 +102,7 @@ fun V2TasksScreen(identity: DeviceIdentity) {
                     contentPadding = PaddingValues(bottom = 90.dp)
                 ) {
                     items(tasks, key = { it.id }) { task ->
-                        TaskCard(task = task) {
+                        TaskCard(task = task, isDriver = isDriver) {
                             scope.launch {
                                 db.deliveryTaskDao().update(
                                     task.copy(
@@ -97,6 +123,7 @@ fun V2TasksScreen(identity: DeviceIdentity) {
     if (showAddDialog) {
         AddTaskDialog(
             identity = identity,
+            employees = employees,
             onDismiss = { showAddDialog = false },
             onSave = { task ->
                 scope.launch {
@@ -109,12 +136,12 @@ fun V2TasksScreen(identity: DeviceIdentity) {
 }
 
 @Composable
-private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
+private fun TaskCard(task: DeliveryTask, isDriver: Boolean, onComplete: () -> Unit) {
+    // 新建的普通待办只带默认值，极简显示；旧的特殊任务仍展示详情，避免信息丢失。
     val simpleReminder = task.taskType == TaskType.DELIVERY.name &&
         task.address.isBlank() &&
         task.deliveryQuantity == 0 &&
         task.pickupQuantity == 0 &&
-        task.assignedEmployeeName.isBlank() &&
         task.paymentStatus == PaymentStatus.UNPAID.name &&
         task.amountToCollect == 0.0 &&
         task.amountPaid == 0.0 &&
@@ -129,6 +156,11 @@ private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
+
+            // 营业员/站长端显示负责人；送气员端不用显示（一定是他自己）
+            if (!isDriver && task.assignedEmployeeName.isNotBlank()) {
+                Text("负责人：${task.assignedEmployeeName}", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            }
 
             // 旧的特殊任务仍保留详细展示；新建的普通待办只显示客户姓名。
             if (!simpleReminder) {
@@ -180,7 +212,6 @@ private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
                     )
                 }
 
-                if (task.assignedEmployeeName.isNotBlank()) Text("负责人：${task.assignedEmployeeName}")
                 if (task.note.isNotBlank()) Text("备注：${task.note}")
             }
 
@@ -196,42 +227,86 @@ private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
 @Composable
 private fun AddTaskDialog(
     identity: DeviceIdentity,
+    employees: List<Employee>,
     onDismiss: () -> Unit,
     onSave: (DeliveryTask) -> Unit
 ) {
     var customer by remember { mutableStateOf("") }
+    val isDriver = identity.role == DeviceRole.DRIVER
+
+    // 送气员自动选中自己；营业员/站长初始不选，必须手动挑一个送气员。
+    var selectedEmployee by remember(identity, employees) {
+        mutableStateOf(
+            if (isDriver) {
+                employees.firstOrNull { employee ->
+                    if (identity.employeeRemoteId.isNotBlank()) employee.firestoreId == identity.employeeRemoteId
+                    else employee.id == identity.employeeId
+                }
+            } else null
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("记一个待办", fontSize = 24.sp, fontWeight = FontWeight.Bold) },
         text = {
-            OutlinedTextField(
-                value = customer,
-                onValueChange = { customer = it },
-                label = { Text("客户姓名") },
-                placeholder = { Text("例如：王叔") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
-            )
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                OutlinedTextField(
+                    value = customer,
+                    onValueChange = { customer = it },
+                    label = { Text("客户姓名") },
+                    placeholder = { Text("例如：黄叔") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
+                )
+
+                if (!isDriver) {
+                    Text("派给谁", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    if (employees.isEmpty()) {
+                        Text(
+                            "还没有员工，请先到设置里添加送气员。",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(employees, key = { it.id }) { employee ->
+                                FilterChip(
+                                    selected = selectedEmployee?.id == employee.id,
+                                    onClick = { selectedEmployee = employee },
+                                    label = { Text(employee.name, fontSize = 17.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(
                 onClick = {
+                    val assignee = selectedEmployee
                     onSave(
                         DeliveryTask(
                             customerName = customer.trim(),
                             taskType = TaskType.DELIVERY.name,
-                            // 普通待办只负责“别忘了这个客户”，不强行猜数量、付款或负责人。
+                            // 普通待办不猜数量/付款/地址，全部默认值
                             deliveryQuantity = 0,
                             pickupQuantity = 0,
+                            // 营业员指派 = 选中送气员；送气员自记 = 自动绑自己
+                            assignedEmployeeId = assignee?.id ?: identity.employeeId.takeIf { isDriver },
+                            assignedEmployeeRemoteId = assignee?.firestoreId
+                                ?: identity.employeeRemoteId.takeIf { isDriver }.orEmpty(),
+                            assignedEmployeeName = assignee?.name
+                                ?: identity.employeeName.takeIf { isDriver }.orEmpty(),
                             createdByEmployeeId = identity.employeeId,
                             createdByName = identity.employeeName,
                             synced = false
                         )
                     )
                 },
-                enabled = customer.isNotBlank()
+                // 营业员/站长必须选了送气员才能保存
+                enabled = customer.isNotBlank() && (isDriver || selectedEmployee != null)
             ) {
                 Text("保存", fontSize = 19.sp)
             }
