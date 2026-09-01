@@ -12,6 +12,9 @@ interface DeliveryTaskDao {
     @Query("SELECT * FROM delivery_tasks WHERE assignedEmployeeId = :employeeId AND status != 'COMPLETED' AND status != 'CANCELLED' ORDER BY priority DESC, createdAt ASC")
     fun observeOpenTasksForEmployee(employeeId: Long): Flow<List<DeliveryTask>>
 
+    @Query("SELECT * FROM delivery_tasks WHERE firestoreId = :firestoreId LIMIT 1")
+    suspend fun getByFirestoreId(firestoreId: String): DeliveryTask?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(task: DeliveryTask): Long
 
