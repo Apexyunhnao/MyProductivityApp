@@ -21,7 +21,7 @@ class LocalServerClient(
 
     override suspend fun health(): Boolean {
         return try {
-            val req = Request.Builder().url("$base/health").get().build()
+            val req = authorized(Request.Builder().url("$base/api-meta/ping")).get().build()
             client.newCall(req).execute().use { it.isSuccessful }
         } catch (_: Exception) {
             false
