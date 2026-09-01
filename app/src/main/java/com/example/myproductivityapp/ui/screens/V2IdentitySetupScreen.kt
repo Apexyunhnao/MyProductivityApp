@@ -72,7 +72,7 @@ fun V2IdentitySetupScreen(
             Text("站长", fontSize = 22.sp)
         }
 
-        HorizontalDivider()
+        Divider()
         Text("送气员：点自己的名字", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
         if (loading && employees.isEmpty()) {
