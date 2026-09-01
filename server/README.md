@@ -95,6 +95,24 @@ server/data/gas_station.db
 
 最好连同 `gas_station.db-wal` 和 `gas_station.db-shm` 一起备份；更稳妥的自动备份脚本后续再加。
 
+## 5.1 开机自启（Windows 小主机）
+
+已配置开机自启，方式为「启动文件夹 + VBS 静默启动」，不需要管理员权限：
+
+- 文件：`C:\Users\31619\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\GasStationV2Server.vbs`
+- 行为：登录时静默调用 `server/start_server.bat`，隐藏窗口，自动使用 `.venv`、API Key `gas-station-local`、数据库 `server/data/gas_station.db`
+- 取消自启：删除该 VBS 文件即可
+- 验证：`http://192.168.1.2:8000/health` 返回 `{"ok": true, ...}`
+
+若机器有多个用户或未自动登录，登录一次后即自动启动；如需要「开机未登录就启动」，改用任务计划程序（需管理员）：
+`schtasks /Create /TN GasStationV2Server /TR "cmd /c cd /d C:\Users\31619\MyProductivityApp\server && start_server.bat" /SC ONSTART /RU <用户名> /RP <密码> /F`
+
+## 5.2 端口说明
+
+- V2 本地服务器监听 `0.0.0.0:8000`（局域网 IP `192.168.1.2:8000`）
+- 本机知识库 RAG 监听 `127.0.0.1:8000`
+- 两者可稳定共存：本机 `127.0.0.1:8000` 走知识库，局域网 `192.168.1.2:8000` 走 V2，互不干扰
+
 ## 6. 当前安全边界
 
 这一版先做站内局域网测试，Android 临时允许 HTTP 明文访问局域网 IP。
