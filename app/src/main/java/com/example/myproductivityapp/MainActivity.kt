@@ -231,9 +231,9 @@ fun V2MainScreen(
 
     val isDriver = identity.role == DeviceRole.DRIVER
 
-    // 路由保护：送气工禁止进入设置页（无论旧导航状态还是其他入口）
+    // 路由保护：送气工禁止进入记账/设置页（无论旧导航状态还是其他入口）
     LaunchedEffect(currentRoute, isDriver) {
-        if (isDriver && currentRoute == "settings") {
+        if (isDriver && (currentRoute == "settings" || currentRoute == "record")) {
             navController.navigate("tasks") {
                 popUpTo("tasks") { inclusive = false }
                 launchSingleTop = true

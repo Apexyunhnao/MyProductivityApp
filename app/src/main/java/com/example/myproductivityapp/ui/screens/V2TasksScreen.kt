@@ -27,7 +27,7 @@ import com.example.myproductivityapp.data.model.TaskType
 import kotlinx.coroutines.launch
 
 /**
- * V2 待办：录入极简，只记客户姓名 + 派给谁。
+ * V2 待办：录入极简，只记客户姓名 + 瓶子标记(选填) + 派给谁。
  * - 营业员/站长：看全站未完成待办；建待办必须选一个送气员。
  * - 送气员：只看派给自己的未完成待办；自己记的自动归自己。
  * 底层字段保留（兼容旧特殊任务），新建普通待办只写默认值。
@@ -135,7 +135,11 @@ fun V2TasksScreen(identity: DeviceIdentity) {
 
 @Composable
 private fun TaskCard(task: DeliveryTask, isDriver: Boolean, onComplete: () -> Unit) {
+    // 瓶子日期/厂检标记（"瓶子:xx"）从 note 单独拆出来展示，不算备注正文。
+    val bottleInfo = bottleInfoFromNote(task.note)
+    val extraNote = noteWithoutBottle(task.note)
     // 新建的普通待办只带默认值，极简显示；旧的特殊任务仍展示详情，避免信息丢失。
+    // note 里的"瓶子:xx"不算额外内容，新建待办仍走极简样式。
     val simpleReminder = task.taskType == TaskType.DELIVERY.name &&
         task.address.isBlank() &&
         task.deliveryQuantity == 0 &&
@@ -145,7 +149,7 @@ private fun TaskCard(task: DeliveryTask, isDriver: Boolean, onComplete: () -> Un
         task.amountPaid == 0.0 &&
         task.debtReminder == 0.0 &&
         task.priority == TaskPriority.NORMAL.name &&
-        task.note.isBlank()
+        extraNote.isBlank()
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -158,6 +162,11 @@ private fun TaskCard(task: DeliveryTask, isDriver: Boolean, onComplete: () -> Un
             // 营业员/站长端显示负责人；送气员端不用显示（一定是他自己）
             if (!isDriver && task.assignedEmployeeName.isNotBlank()) {
                 Text("负责人：${task.assignedEmployeeName}", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            }
+
+            // 瓶子日期/厂检标记：送气工端和营业员端都展示
+            if (bottleInfo != null) {
+                Text(bottleInfo, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             }
 
             // 旧的特殊任务仍保留详细展示；新建的普通待办只显示客户姓名。
@@ -210,7 +219,7 @@ private fun TaskCard(task: DeliveryTask, isDriver: Boolean, onComplete: () -> Un
                     )
                 }
 
-                if (task.note.isNotBlank()) Text("备注：${task.note}")
+                if (extraNote.isNotBlank()) Text("备注：$extraNote")
             }
 
             Button(onClick = onComplete, modifier = Modifier.fillMaxWidth().height(54.dp)) {
@@ -230,6 +239,7 @@ private fun AddTaskDialog(
     onSave: (DeliveryTask) -> Unit
 ) {
     var customer by remember { mutableStateOf("") }
+    var bottleMark by remember { mutableStateOf("") }
     val isDriver = identity.role == DeviceRole.DRIVER
 
     // 送气员自动选中自己；营业员/站长初始不选，必须手动挑一个送气员。
@@ -254,6 +264,17 @@ private fun AddTaskDialog(
                     onValueChange = { customer = it },
                     label = { Text("客户姓名") },
                     placeholder = { Text("例如：黄叔") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
+                )
+
+                // 瓶子日期/厂检标记：瓶身生产/厂检标记，营业员、站长和送气工都显示，可空。
+                OutlinedTextField(
+                    value = bottleMark,
+                    onValueChange = { bottleMark = it },
+                    label = { Text("瓶子日期/厂检标记") },
+                    placeholder = { Text("例如：22厂 / 22检（选填）") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
@@ -284,6 +305,9 @@ private fun AddTaskDialog(
             Button(
                 onClick = {
                     val assignee = selectedEmployee
+                    // 瓶子日期/厂检标记拼进 note；空则不写，旧待办不受影响。
+                    val bottle = bottleMark.trim()
+                    val note = if (bottle.isBlank()) "" else "瓶子:$bottle"
                     onSave(
                         DeliveryTask(
                             customerName = customer.trim(),
@@ -297,6 +321,7 @@ private fun AddTaskDialog(
                                 ?: identity.employeeRemoteId.takeIf { isDriver }.orEmpty(),
                             assignedEmployeeName = assignee?.name
                                 ?: identity.employeeName.takeIf { isDriver }.orEmpty(),
+                            note = note,
                             createdByEmployeeId = identity.employeeId,
                             createdByName = identity.employeeName,
                             synced = false
@@ -313,4 +338,27 @@ private fun AddTaskDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+/** 从 note 里提取"瓶子:xx"标记段（新建待办的瓶子日期/厂检标记），没有则返回 null。 */
+private fun bottleInfoFromNote(note: String): String? {
+    if (note.isBlank()) return null
+    return note.split(" | ")
+        .mapNotNull { seg ->
+            val s = seg.trim()
+            if (s.startsWith("瓶子:")) {
+                val v = s.removePrefix("瓶子:").trim()
+                if (v.isNotBlank()) "瓶子:$v" else null
+            } else null
+        }
+        .firstOrNull()
+}
+
+/** 去掉 note 里的"瓶子:xx"段，用于判断是否极简待办、展示其余备注。 */
+private fun noteWithoutBottle(note: String): String {
+    if (note.isBlank()) return ""
+    return note.split(" | ")
+        .filterNot { it.trim().startsWith("瓶子:") }
+        .joinToString(" | ")
+        .trim()
 }
