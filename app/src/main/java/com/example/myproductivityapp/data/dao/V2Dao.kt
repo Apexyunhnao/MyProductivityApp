@@ -9,6 +9,9 @@ interface DeliveryTaskDao {
     @Query("SELECT * FROM delivery_tasks WHERE status != 'COMPLETED' AND status != 'CANCELLED' ORDER BY priority DESC, createdAt ASC")
     fun observeOpenTasks(): Flow<List<DeliveryTask>>
 
+    @Query("SELECT * FROM delivery_tasks WHERE assignedEmployeeRemoteId = :employeeRemoteId AND status != 'COMPLETED' AND status != 'CANCELLED' ORDER BY priority DESC, createdAt ASC")
+    fun observeOpenTasksForEmployeeRemote(employeeRemoteId: String): Flow<List<DeliveryTask>>
+
     @Query("SELECT * FROM delivery_tasks WHERE assignedEmployeeId = :employeeId AND status != 'COMPLETED' AND status != 'CANCELLED' ORDER BY priority DESC, createdAt ASC")
     fun observeOpenTasksForEmployee(employeeId: Long): Flow<List<DeliveryTask>>
 
