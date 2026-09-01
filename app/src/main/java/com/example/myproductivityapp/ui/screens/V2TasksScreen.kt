@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -14,16 +15,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myproductivityapp.data.AppDatabase
+import com.example.myproductivityapp.data.local.DeviceIdentity
+import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.*
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun V2TasksScreen() {
+fun V2TasksScreen(identity: DeviceIdentity) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     val scope = rememberCoroutineScope()
@@ -32,8 +33,13 @@ fun V2TasksScreen() {
     var employees by remember { mutableStateOf<List<Employee>>(emptyList()) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        db.deliveryTaskDao().observeOpenTasks().collect { tasks = it }
+    LaunchedEffect(identity) {
+        val driverId = identity.employeeId
+        if (identity.role == DeviceRole.DRIVER && driverId != null) {
+            db.deliveryTaskDao().observeOpenTasksForEmployee(driverId).collect { tasks = it }
+        } else {
+            db.deliveryTaskDao().observeOpenTasks().collect { tasks = it }
+        }
     }
     LaunchedEffect(Unit) {
         db.employeeDao().getAllEmployees().collect { employees = it }
@@ -55,19 +61,21 @@ fun V2TasksScreen() {
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Text("待办", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("还没做完的事情一直留在这里。", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (identity.role == DeviceRole.DRIVER) "${identity.employeeName}要做的事情"
+                else "全站还没做完的事情",
+                style = MaterialTheme.typography.bodyLarge
+            )
             Spacer(Modifier.height(12.dp))
 
             if (tasks.isEmpty()) {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
+                    Text(
+                        "现在没有未完成任务",
                         modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("现在没有未完成任务", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(6.dp))
-                        Text("客户来电话、发消息或自己拿瓶来时，点右下角记下来。")
-                    }
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             } else {
                 LazyColumn(
@@ -75,21 +83,18 @@ fun V2TasksScreen() {
                     contentPadding = PaddingValues(bottom = 90.dp)
                 ) {
                     items(tasks, key = { it.id }) { task ->
-                        TaskCard(
-                            task = task,
-                            onComplete = {
-                                scope.launch {
-                                    db.deliveryTaskDao().update(
-                                        task.copy(
-                                            status = TaskStatus.COMPLETED.name,
-                                            completedAt = System.currentTimeMillis(),
-                                            updatedAt = System.currentTimeMillis(),
-                                            synced = false
-                                        )
+                        TaskCard(task = task) {
+                            scope.launch {
+                                db.deliveryTaskDao().update(
+                                    task.copy(
+                                        status = TaskStatus.COMPLETED.name,
+                                        completedAt = System.currentTimeMillis(),
+                                        updatedAt = System.currentTimeMillis(),
+                                        synced = false
                                     )
-                                }
+                                )
                             }
-                        )
+                        }
                     }
                 }
             }
@@ -99,6 +104,7 @@ fun V2TasksScreen() {
     if (showAddDialog) {
         AddTaskDialog(
             employees = employees,
+            identity = identity,
             onDismiss = { showAddDialog = false },
             onSave = { task ->
                 scope.launch {
@@ -127,20 +133,13 @@ private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    task.customerName.ifBlank { "未写客户" },
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(task.customerName.ifBlank { "未写客户" }, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 if (task.priority == TaskPriority.URGENT.name) {
                     AssistChip(onClick = {}, label = { Text("急") })
                 }
@@ -160,33 +159,22 @@ private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
                 )
             }
 
-            val payColor = if (task.paymentStatus == PaymentStatus.PAID.name) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.error
-            }
             Text(
                 buildString {
                     append(paymentText)
                     if (task.amountPaid > 0) append(" ¥${String.format("%.0f", task.amountPaid)}")
                     if (task.debtReminder > 0) append("　旧欠 ¥${String.format("%.0f", task.debtReminder)}")
                 },
-                color = payColor,
+                color = if (task.paymentStatus == PaymentStatus.PAID.name) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
 
-            if (task.assignedEmployeeName.isNotBlank()) {
-                Text("负责人：${task.assignedEmployeeName}")
-            }
+            if (task.assignedEmployeeName.isNotBlank()) Text("负责人：${task.assignedEmployeeName}")
             if (task.note.isNotBlank()) Text("备注：${task.note}")
 
-            Button(
-                onClick = onComplete,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) {
+            Button(onClick = onComplete, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Icon(Icons.Default.Check, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("完成", fontSize = 19.sp)
@@ -195,10 +183,10 @@ private fun TaskCard(task: DeliveryTask, onComplete: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddTaskDialog(
     employees: List<Employee>,
+    identity: DeviceIdentity,
     onDismiss: () -> Unit,
     onSave: (DeliveryTask) -> Unit
 ) {
@@ -210,7 +198,12 @@ private fun AddTaskDialog(
     var payment by remember { mutableStateOf(PaymentStatus.UNPAID) }
     var amountPaid by remember { mutableStateOf("") }
     var oldDebt by remember { mutableStateOf("") }
-    var selectedEmployee by remember { mutableStateOf<Employee?>(null) }
+    var selectedEmployee by remember(identity) {
+        mutableStateOf(
+            if (identity.role == DeviceRole.DRIVER) employees.firstOrNull { it.id == identity.employeeId }
+            else null
+        )
+    }
     var urgent by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
 
@@ -219,144 +212,64 @@ private fun AddTaskDialog(
         title = { Text("记一个待办", fontSize = 24.sp, fontWeight = FontWeight.Bold) },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 560.dp),
+                Modifier.fillMaxWidth().heightIn(max = 560.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item {
-                        FilterChip(
-                            selected = type == TaskType.DELIVERY,
-                            onClick = { type = TaskType.DELIVERY },
-                            label = { Text("送气") }
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = type == TaskType.CUSTOMER_DROPOFF,
-                            onClick = { type = TaskType.CUSTOMER_DROPOFF },
-                            label = { Text("客户拿瓶来") }
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = type == TaskType.PICKUP_ONLY,
-                            onClick = { type = TaskType.PICKUP_ONLY },
-                            label = { Text("只收瓶") }
-                        )
-                    }
+                    item { FilterChip(type == TaskType.DELIVERY, { type = TaskType.DELIVERY }, { Text("送气") }) }
+                    item { FilterChip(type == TaskType.CUSTOMER_DROPOFF, { type = TaskType.CUSTOMER_DROPOFF }, { Text("客户拿瓶来") }) }
+                    item { FilterChip(type == TaskType.PICKUP_ONLY, { type = TaskType.PICKUP_ONLY }, { Text("只收瓶") }) }
                 }
 
-                OutlinedTextField(
-                    value = customer,
-                    onValueChange = { customer = it },
-                    label = { Text("客户/称呼") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text("村 / 地址") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                OutlinedTextField(customer, { customer = it }, label = { Text("客户/称呼") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(address, { address = it }, label = { Text("村 / 地址") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
                 if (type != TaskType.PICKUP_ONLY) {
-                    OutlinedTextField(
-                        value = deliveryQty,
-                        onValueChange = { deliveryQty = it.filter(Char::isDigit) },
-                        label = { Text(if (type == TaskType.CUSTOMER_DROPOFF) "以后要送回几瓶" else "要送几瓶") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
+                    NumberField(
+                        if (type == TaskType.CUSTOMER_DROPOFF) "以后要送回几瓶" else "要送几瓶",
+                        deliveryQty
+                    ) { deliveryQty = it }
                 }
-                OutlinedTextField(
-                    value = pickupQty,
-                    onValueChange = { pickupQty = it.filter(Char::isDigit) },
-                    label = { Text(if (type == TaskType.CUSTOMER_DROPOFF) "客户拿来几瓶" else "要收几瓶") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                NumberField(
+                    if (type == TaskType.CUSTOMER_DROPOFF) "客户拿来几瓶" else "要收几瓶",
+                    pickupQty
+                ) { pickupQty = it }
 
                 Text("钱", fontWeight = FontWeight.Bold)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item {
-                        FilterChip(
-                            selected = payment == PaymentStatus.UNPAID,
-                            onClick = { payment = PaymentStatus.UNPAID },
-                            label = { Text("未付款") }
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = payment == PaymentStatus.PAID,
-                            onClick = { payment = PaymentStatus.PAID },
-                            label = { Text("已付款") }
-                        )
-                    }
-                    item {
-                        FilterChip(
-                            selected = payment == PaymentStatus.DEBT,
-                            onClick = { payment = PaymentStatus.DEBT },
-                            label = { Text("欠款") }
-                        )
-                    }
+                    item { FilterChip(payment == PaymentStatus.UNPAID, { payment = PaymentStatus.UNPAID }, { Text("未付款") }) }
+                    item { FilterChip(payment == PaymentStatus.PAID, { payment = PaymentStatus.PAID }, { Text("已付款") }) }
+                    item { FilterChip(payment == PaymentStatus.DEBT, { payment = PaymentStatus.DEBT }, { Text("欠款") }) }
                 }
-
-                if (payment == PaymentStatus.PAID || payment == PaymentStatus.PARTIAL) {
-                    OutlinedTextField(
-                        value = amountPaid,
-                        onValueChange = { amountPaid = it.filter { c -> c.isDigit() || c == '.' } },
-                        label = { Text("已经收了多少钱") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
+                if (payment == PaymentStatus.PAID) {
+                    MoneyTaskField("已经收了多少钱", amountPaid) { amountPaid = it }
                 }
-                OutlinedTextField(
-                    value = oldDebt,
-                    onValueChange = { oldDebt = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("以前还欠多少钱（没有就空着）") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                MoneyTaskField("以前还欠多少钱（没有就空着）", oldDebt) { oldDebt = it }
 
-                Text("谁去", fontWeight = FontWeight.Bold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item {
-                        FilterChip(
-                            selected = selectedEmployee == null,
-                            onClick = { selectedEmployee = null },
-                            label = { Text("先不定") }
-                        )
+                if (identity.role != DeviceRole.DRIVER) {
+                    Text("谁去", fontWeight = FontWeight.Bold)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item {
+                            FilterChip(selectedEmployee == null, { selectedEmployee = null }, { Text("先不定") })
+                        }
+                        items(employees, key = { it.id }) { employee ->
+                            FilterChip(
+                                selected = selectedEmployee?.id == employee.id,
+                                onClick = { selectedEmployee = employee },
+                                label = { Text(employee.name) }
+                            )
+                        }
                     }
-                    items(employees, key = { it.id }) { employee ->
-                        FilterChip(
-                            selected = selectedEmployee?.id == employee.id,
-                            onClick = { selectedEmployee = employee },
-                            label = { Text(employee.name) }
-                        )
-                    }
+                } else {
+                    Text("负责人：${identity.employeeName}", fontWeight = FontWeight.Bold)
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = urgent, onCheckedChange = { urgent = it })
+                    Switch(urgent, { urgent = it })
                     Spacer(Modifier.width(8.dp))
                     Text("急单")
                 }
-
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("备注（可不填）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2
-                )
+                OutlinedTextField(note, { note = it }, label = { Text("备注（可不填）") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             }
         },
         confirmButton = {
@@ -369,13 +282,15 @@ private fun AddTaskDialog(
                             taskType = type.name,
                             deliveryQuantity = if (type == TaskType.PICKUP_ONLY) 0 else deliveryQty.toIntOrNull() ?: 0,
                             pickupQuantity = pickupQty.toIntOrNull() ?: 0,
-                            assignedEmployeeId = selectedEmployee?.id,
-                            assignedEmployeeName = selectedEmployee?.name.orEmpty(),
+                            assignedEmployeeId = selectedEmployee?.id ?: identity.employeeId.takeIf { identity.role == DeviceRole.DRIVER },
+                            assignedEmployeeName = selectedEmployee?.name ?: identity.employeeName.takeIf { identity.role == DeviceRole.DRIVER }.orEmpty(),
                             paymentStatus = payment.name,
                             amountPaid = amountPaid.toDoubleOrNull() ?: 0.0,
                             debtReminder = oldDebt.toDoubleOrNull() ?: 0.0,
                             priority = if (urgent) TaskPriority.URGENT.name else TaskPriority.NORMAL.name,
                             note = note,
+                            createdByEmployeeId = identity.employeeId,
+                            createdByName = identity.employeeName,
                             synced = false
                         )
                     )
@@ -383,8 +298,30 @@ private fun AddTaskDialog(
                 enabled = customer.isNotBlank() || address.isNotBlank()
             ) { Text("保存") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun NumberField(label: String, value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.filter(Char::isDigit)) },
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
+    )
+}
+
+@Composable
+private fun MoneyTaskField(label: String, value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.filter { c -> c.isDigit() || c == '.' }) },
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
     )
 }
