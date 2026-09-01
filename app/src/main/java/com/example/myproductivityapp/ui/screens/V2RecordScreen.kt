@@ -68,7 +68,11 @@ fun V2RecordScreen() {
         yearRepo.observeAll().collect { years = it.distinctBy { y -> "${y.year}-${y.type}" } }
     }
     LaunchedEffect(Unit) {
-        prices = BottleType.values().associateWith { priceRepo.getByType(it.name)?.price ?: 0 }
+        val loaded = mutableMapOf<BottleType, Int>()
+        BottleType.values().forEach { type ->
+            loaded[type] = priceRepo.getByType(type.name)?.price ?: 0
+        }
+        prices = loaded
     }
 
     val rentalQty = rentalMarks.values.sum()
@@ -86,9 +90,15 @@ fun V2RecordScreen() {
     val marks = years.map { "${it.year}${it.type}" }.distinct()
 
     fun reset() {
-        heavy = 0; fresh = 0; small = 0
-        rentalMarks.clear(); exchangeMarks.clear()
-        rentalCustomer = ""; cashText = ""; wechatText = ""; note = ""
+        heavy = 0
+        fresh = 0
+        small = 0
+        rentalMarks.clear()
+        exchangeMarks.clear()
+        rentalCustomer = ""
+        cashText = ""
+        wechatText = ""
+        note = ""
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { inner ->
@@ -104,19 +114,28 @@ fun V2RecordScreen() {
             Text("先点谁送的，再记数量和收款。", style = MaterialTheme.typography.bodyLarge)
 
             Title("1  谁送的")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(employees, key = { it.id }) { item ->
-                    FilterChip(
-                        selected = employee?.id == item.id,
-                        onClick = { employee = item },
-                        label = { Text(item.name, fontSize = 18.sp) }
-                    )
+            if (employees.isEmpty()) {
+                Text("还没有员工，请先到右上角设置里添加。")
+            } else {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(employees, key = { it.id }) { item ->
+                        FilterChip(
+                            selected = employee?.id == item.id,
+                            onClick = { employee = item },
+                            label = { Text(item.name, fontSize = 18.sp) }
+                        )
+                    }
                 }
             }
 
             Title("2  瓶子")
-            SimpleCounter("重瓶", priceText(prices[BottleType.HEAVY] ?: 0), heavy,
-                { if (heavy > 0) heavy-- }, { heavy++ })
+            SimpleCounter(
+                title = "重瓶",
+                help = priceText(prices[BottleType.HEAVY] ?: 0),
+                qty = heavy,
+                minus = { if (heavy > 0) heavy-- },
+                plus = { heavy++ }
+            )
 
             MarkCounter(
                 title = "租瓶",
@@ -134,10 +153,20 @@ fun V2RecordScreen() {
                 counts = exchangeMarks
             )
 
-            SimpleCounter("新瓶", priceText(prices[BottleType.NEW] ?: 0), fresh,
-                { if (fresh > 0) fresh-- }, { fresh++ })
-            SimpleCounter("小瓶", priceText(prices[BottleType.SMALL] ?: 0), small,
-                { if (small > 0) small-- }, { small++ })
+            SimpleCounter(
+                title = "新瓶",
+                help = priceText(prices[BottleType.NEW] ?: 0),
+                qty = fresh,
+                minus = { if (fresh > 0) fresh-- },
+                plus = { fresh++ }
+            )
+            SimpleCounter(
+                title = "小瓶",
+                help = priceText(prices[BottleType.SMALL] ?: 0),
+                qty = small,
+                minus = { if (small > 0) small-- },
+                plus = { small++ }
+            )
 
             Title("3  收了多少钱")
             Card(Modifier.fillMaxWidth()) {
@@ -149,10 +178,12 @@ fun V2RecordScreen() {
                     MoneyField("现金", cashText) { cashText = it }
                     MoneyField("微信", wechatText) { wechatText = it }
                     if (debt > 0) {
-                        Text("还欠 ¥${String.format("%.0f", debt)}",
+                        Text(
+                            "还欠 ¥${String.format("%.0f", debt)}",
                             color = MaterialTheme.colorScheme.error,
                             fontSize = 21.sp,
-                            fontWeight = FontWeight.Bold)
+                            fontWeight = FontWeight.Bold
+                        )
                     } else if (cash + wechat > 0) {
                         Text("已结清", color = MaterialTheme.colorScheme.primary, fontSize = 19.sp)
                     }
@@ -225,7 +256,9 @@ fun V2RecordScreen() {
                         }
                     }
                 }
-            ) { Text(if (saving) "正在保存…" else "保存这笔", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+            ) {
+                Text(if (saving) "正在保存…" else "保存这笔", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
 
             Spacer(Modifier.height(20.dp))
         }
@@ -233,19 +266,39 @@ fun V2RecordScreen() {
 }
 
 @Composable
-private fun Title(text: String) = Text(text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+private fun Title(text: String) {
+    Text(text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+}
 
 @Composable
-private fun SimpleCounter(title: String, help: String, qty: Int, minus: () -> Unit, plus: () -> Unit) {
+private fun SimpleCounter(
+    title: String,
+    help: String,
+    qty: Int,
+    minus: () -> Unit,
+    plus: () -> Unit
+) {
     Card(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(Modifier.weight(1f)) {
                 Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
                 Text(help)
             }
-            FilledTonalIconButton(onClick = minus, enabled = qty > 0) { Icon(Icons.Default.Remove, "减1") }
-            Text(qty.toString(), modifier = Modifier.widthIn(min = 52.dp), fontSize = 27.sp, fontWeight = FontWeight.Bold)
-            FilledIconButton(onClick = plus) { Icon(Icons.Default.Add, "加1") }
+            FilledTonalIconButton(onClick = minus, enabled = qty > 0) {
+                Icon(Icons.Default.Remove, "减1")
+            }
+            Text(
+                qty.toString(),
+                modifier = Modifier.widthIn(min = 52.dp),
+                fontSize = 27.sp,
+                fontWeight = FontWeight.Bold
+            )
+            FilledIconButton(onClick = plus) {
+                Icon(Icons.Default.Add, "加1")
+            }
         }
     }
 }
@@ -272,16 +325,28 @@ private fun MarkCounter(
                     singleLine = true
                 )
             }
-            if (marks.isEmpty()) Text("还没有设置厂/检年份，请到设置里添加。")
+            if (marks.isEmpty()) {
+                Text("还没有设置厂/检年份，请到设置里添加。")
+            }
             marks.forEach { mark ->
                 val qty = counts[mark] ?: 0
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(mark, Modifier.weight(1f), fontSize = 19.sp, fontWeight = FontWeight.Medium)
-                    FilledTonalIconButton(onClick = { if (qty > 0) counts[mark] = qty - 1 }, enabled = qty > 0) {
+                    FilledTonalIconButton(
+                        onClick = { if (qty > 0) counts[mark] = qty - 1 },
+                        enabled = qty > 0
+                    ) {
                         Icon(Icons.Default.Remove, "减1")
                     }
-                    Text(qty.toString(), modifier = Modifier.widthIn(min = 46.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    FilledTonalIconButton(onClick = { counts[mark] = qty + 1 }) { Icon(Icons.Default.Add, "加1") }
+                    Text(
+                        qty.toString(),
+                        modifier = Modifier.widthIn(min = 46.dp),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    FilledTonalIconButton(onClick = { counts[mark] = qty + 1 }) {
+                        Icon(Icons.Default.Add, "加1")
+                    }
                 }
             }
         }
@@ -301,11 +366,12 @@ private fun MoneyField(label: String, value: String, onChange: (String) -> Unit)
     )
 }
 
-private fun priceText(price: Int) = if (price > 0) "¥$price / 瓶" else "价格未设置"
+private fun priceText(price: Int): String = if (price > 0) "¥$price / 瓶" else "价格未设置"
 
-private fun marksText(values: Map<String, Int>) = values
+private fun marksText(values: Map<String, Int>): String = values
     .filterValues { it > 0 }
-    .entries.joinToString(" ") { "${it.key}:${it.value}个" }
+    .entries
+    .joinToString(" ") { "${it.key}:${it.value}个" }
 
 private fun buildBottleDetails(
     recordId: Long,
@@ -318,14 +384,47 @@ private fun buildBottleDetails(
     prices: Map<BottleType, Int>
 ): List<BottleDetail> {
     val result = mutableListOf<BottleDetail>()
-    if (heavy > 0) result += BottleDetail(recordId = 0, deliveryRecordId = recordId, bottleType = BottleType.HEAVY.name, quantity = heavy, unitPrice = (prices[BottleType.HEAVY] ?: 0).toDouble())
+    if (heavy > 0) {
+        result += BottleDetail(
+            deliveryRecordId = recordId,
+            bottleType = BottleType.HEAVY.name,
+            quantity = heavy,
+            unitPrice = (prices[BottleType.HEAVY] ?: 0).toDouble()
+        )
+    }
     rentalMarks.filterValues { it > 0 }.forEach { (mark, qty) ->
-        result += BottleDetail(deliveryRecordId = recordId, bottleType = BottleType.RENTAL.name, quantity = qty, productionMark = mark, customerName = rentalCustomer, unitPrice = (prices[BottleType.RENTAL] ?: 0).toDouble())
+        result += BottleDetail(
+            deliveryRecordId = recordId,
+            bottleType = BottleType.RENTAL.name,
+            quantity = qty,
+            productionMark = mark,
+            customerName = rentalCustomer,
+            unitPrice = (prices[BottleType.RENTAL] ?: 0).toDouble()
+        )
     }
     exchangeMarks.filterValues { it > 0 }.forEach { (mark, qty) ->
-        result += BottleDetail(deliveryRecordId = recordId, bottleType = BottleType.EXCHANGE.name, quantity = qty, productionMark = mark)
+        result += BottleDetail(
+            deliveryRecordId = recordId,
+            bottleType = BottleType.EXCHANGE.name,
+            quantity = qty,
+            productionMark = mark
+        )
     }
-    if (fresh > 0) result += BottleDetail(deliveryRecordId = recordId, bottleType = BottleType.NEW.name, quantity = fresh, unitPrice = (prices[BottleType.NEW] ?: 0).toDouble())
-    if (small > 0) result += BottleDetail(deliveryRecordId = recordId, bottleType = BottleType.SMALL.name, quantity = small, unitPrice = (prices[BottleType.SMALL] ?: 0).toDouble())
+    if (fresh > 0) {
+        result += BottleDetail(
+            deliveryRecordId = recordId,
+            bottleType = BottleType.NEW.name,
+            quantity = fresh,
+            unitPrice = (prices[BottleType.NEW] ?: 0).toDouble()
+        )
+    }
+    if (small > 0) {
+        result += BottleDetail(
+            deliveryRecordId = recordId,
+            bottleType = BottleType.SMALL.name,
+            quantity = small,
+            unitPrice = (prices[BottleType.SMALL] ?: 0).toDouble()
+        )
+    }
     return result
 }
