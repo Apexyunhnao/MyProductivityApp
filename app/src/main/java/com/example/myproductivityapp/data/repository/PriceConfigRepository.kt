@@ -1,15 +1,15 @@
 package com.example.myproductivityapp.data.repository
 
-import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
 import com.example.myproductivityapp.data.dao.PriceConfigDao
 import com.example.myproductivityapp.data.model.PriceConfig
+import com.example.myproductivityapp.data.remote.RemoteDataClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 class PriceConfigRepository(
     private val dao: PriceConfigDao,
-    private val client: CloudBaseClient
+    private val client: RemoteDataClient
 ) {
     private val table = "price_config"
 
@@ -30,9 +30,10 @@ class PriceConfigRepository(
             )
             if (entity.firestoreId.isNotBlank()) {
                 client.update(table, entity.firestoreId, data)
+                dao.insertPrice(entity.copy(synced = true))
             } else {
-                val fsId = client.add(table, data)
-                dao.insertPrice(entity.copy(firestoreId = fsId, synced = true))
+                val remoteId = client.add(table, data)
+                dao.insertPrice(entity.copy(firestoreId = remoteId, synced = remoteId.isNotBlank()))
             }
         } catch (_: Exception) { }
     }
@@ -47,9 +48,9 @@ class PriceConfigRepository(
     suspend fun syncFromCloud() = withContext(Dispatchers.IO) {
         val docs = client.list(table)
         for (obj in docs) {
-            val fsId = (obj["id"] ?: obj["_id"] ?: "").toString()
-            if (fsId.isBlank()) continue
-            val existing = dao.getByFirestoreId(fsId)
+            val remoteId = (obj["id"] ?: obj["_id"] ?: "").toString()
+            if (remoteId.isBlank()) continue
+            val existing = dao.getByFirestoreId(remoteId)
             val remoteUpdatedAt = (obj["updatedAt"] as? Number)?.toLong() ?: 0
             if (existing != null && existing.updatedAt >= remoteUpdatedAt) continue
 
@@ -57,7 +58,9 @@ class PriceConfigRepository(
                 bottleType = (obj["bottleType"] as? String) ?: "",
                 price = (obj["price"] as? Number)?.toInt() ?: 0,
                 lastUpdated = (obj["lastUpdated"] as? Number)?.toLong() ?: 0,
-                firestoreId = fsId, updatedAt = remoteUpdatedAt, synced = true
+                firestoreId = remoteId,
+                updatedAt = remoteUpdatedAt,
+                synced = true
             ))
         }
     }
