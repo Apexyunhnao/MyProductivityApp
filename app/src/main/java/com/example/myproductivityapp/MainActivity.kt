@@ -21,6 +21,8 @@ import com.example.myproductivityapp.auth.AuthState
 import com.example.myproductivityapp.auth.AuthViewModel
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
+import com.example.myproductivityapp.data.local.DeviceIdentity
+import com.example.myproductivityapp.data.local.DeviceIdentityManager
 import com.example.myproductivityapp.data.repository.*
 import com.example.myproductivityapp.ui.screens.*
 import com.example.myproductivityapp.ui.theme.MyProductivityAppTheme
@@ -64,13 +66,41 @@ fun AppEntryPoint() {
             }
         }
         is AuthState.LoggedOut -> LoginScreen(viewModel = viewModel)
-        is AuthState.LoggedIn -> V2MainScreen(client = client)
+        is AuthState.LoggedIn -> V2IdentityGate(client)
+    }
+}
+
+@Composable
+private fun V2IdentityGate(client: CloudBaseClient) {
+    val context = LocalContext.current
+    val manager = remember { DeviceIdentityManager(context) }
+    var identity by remember { mutableStateOf(manager.load()) }
+
+    val current = identity
+    if (current == null) {
+        V2IdentitySetupScreen(client = client) { selected ->
+            manager.save(selected)
+            identity = selected
+        }
+    } else {
+        V2MainScreen(
+            client = client,
+            identity = current,
+            onChangeIdentity = {
+                manager.clear()
+                identity = null
+            }
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun V2MainScreen(client: CloudBaseClient) {
+fun V2MainScreen(
+    client: CloudBaseClient,
+    identity: DeviceIdentity,
+    onChangeIdentity: () -> Unit
+) {
     val context = LocalContext.current
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -109,8 +139,12 @@ fun V2MainScreen(client: CloudBaseClient) {
             TopAppBar(
                 title = { Text(title) },
                 actions = {
-                    IconButton(onClick = { navController.navigate("settings") }) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
+                    if (currentRoute == "settings") {
+                        TextButton(onClick = onChangeIdentity) { Text("换身份") }
+                    } else {
+                        IconButton(onClick = { navController.navigate("settings") }) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置")
+                        }
                     }
                 }
             )
@@ -151,7 +185,7 @@ fun V2MainScreen(client: CloudBaseClient) {
             modifier = Modifier.padding(padding)
         ) {
             composable("record") { V2RecordScreen() }
-            composable("tasks") { V2TasksScreen() }
+            composable("tasks") { V2TasksScreen(identity) }
             composable("ledger") { V2LedgerScreen() }
             composable("settings") { SettingsScreen() }
         }
