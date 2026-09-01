@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MenuBook
@@ -171,7 +172,7 @@ private fun V2IdentityGate(
 
     val current = identity
     if (current == null) {
-        V2IdentitySetupScreen(client = client) { selected ->
+        V2IdentitySetupScreen(client = client, needConfirm = manager.hasIdentityBefore()) { selected ->
             manager.save(selected)
             identity = selected
         }
@@ -245,6 +246,13 @@ fun V2MainScreen(
         topBar = {
             TopAppBar(
                 title = { Text(title) },
+                navigationIcon = {
+                    if (currentRoute == "settings") {
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                        }
+                    }
+                },
                 actions = {
                     if (currentRoute == "settings") {
                         TextButton(onClick = onChangeIdentity) { Text("换身份") }

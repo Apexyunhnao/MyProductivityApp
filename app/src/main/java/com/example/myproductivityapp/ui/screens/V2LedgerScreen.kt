@@ -1,19 +1,30 @@
 package com.example.myproductivityapp.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.myproductivityapp.MainActivity
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.DeliveryRecord
+import com.example.myproductivityapp.data.repository.DeliveryRecordRepository
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -21,7 +32,15 @@ import java.util.*
 fun V2LedgerScreen(identity: DeviceIdentity) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
+    val scope = rememberCoroutineScope()
     var records by remember { mutableStateOf<List<DeliveryRecord>>(emptyList()) }
+    var editingRecord by remember { mutableStateOf<DeliveryRecord?>(null) }
+    // 营业员/站长保存改动的记录（含年份级对瓶切换），写本地 + 云端
+    val saveRecord: (DeliveryRecord) -> Unit = { updated ->
+        scope.launch {
+            DeliveryRecordRepository(db.deliveryRecordDao(), MainActivity.cloudClient).update(updated)
+        }
+    }
 
     LaunchedEffect(Unit) {
         db.deliveryRecordDao().getAllRecords().collect { all ->
@@ -53,11 +72,30 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
     }
+    val todayTitle = remember {
+        SimpleDateFormat("M月d日 EEEE", Locale.CHINESE).format(Date())
+    }
     val todayRecords = records.filter { it.date >= startOfDay }
     val todayQty = todayRecords.sumOf { it.quantity }
     val todayAmount = todayRecords.sumOf { it.totalAmount }
-    val todayDebt = todayRecords.sumOf { it.debtAmount }
-    val allDebt = records.filter { it.debtAmount > 0.0 }
+
+    // 以往记录按天分组（key=当天零点），分组按天倒序；组内沿用 records 本身 date DESC 顺序。
+    val dayGroups = remember(records) {
+        val map = LinkedHashMap<Long, MutableList<DeliveryRecord>>()
+        val cal = Calendar.getInstance()
+        for (rec in records) {
+            cal.timeInMillis = rec.date
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            map.getOrPut(cal.timeInMillis) { mutableListOf() }.add(rec)
+        }
+        map.toList().sortedByDescending { it.first }
+    }
+    val expandedDays = remember { mutableStateMapOf<Long, Boolean>() }
+    // 员工当天总结展开状态，key = "${dayStart}:${employeeName}"
+    val expandedEmployees = remember { mutableStateMapOf<String, Boolean>() }
 
     LazyColumn(
         modifier = Modifier
@@ -67,9 +105,9 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
-            Text("统计", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("今天", fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Text(
-                if (identity.role == DeviceRole.DRIVER) "只看你自己的记录。" else "先看今天，再看欠款。",
+                if (identity.role == DeviceRole.DRIVER) "只看你自己的记录。" else "先看今天，再看记录。",
                 style = MaterialTheme.typography.bodyLarge
             )
         }
@@ -80,17 +118,9 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text("今天", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(todayTitle, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Text("$todayQty 瓶", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     Text("金额 ¥${String.format("%.0f", todayAmount)}", fontSize = 19.sp)
-                    if (todayDebt > 0) {
-                        Text(
-                            "今天未收 ¥${String.format("%.0f", todayDebt)}",
-                            color = MaterialTheme.colorScheme.error,
-                            fontSize = 19.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
         }
@@ -100,7 +130,7 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
             .toList()
             .sortedByDescending { it.second.first }
 
-        if (byEmployee.isNotEmpty()) {
+        if (identity.role != DeviceRole.DRIVER && byEmployee.isNotEmpty()) {
             item { Text("今天每个人", fontSize = 21.sp, fontWeight = FontWeight.Bold) }
             items(byEmployee, key = { it.first }) { (name, summary) ->
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -119,61 +149,535 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
 
         item {
             Spacer(Modifier.height(4.dp))
-            Text("欠款", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+            Text("以往记录", fontSize = 21.sp, fontWeight = FontWeight.Bold)
         }
-        if (allDebt.isEmpty()) {
+        if (records.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Text("没有记录到欠款", modifier = Modifier.padding(16.dp), fontSize = 18.sp)
+                    Text("还没有记录", modifier = Modifier.padding(16.dp), fontSize = 18.sp)
                 }
             }
         } else {
-            items(allDebt.take(30), key = { it.id }) { record ->
-                DebtRecordCard(record)
+            dayGroups.forEach { (day, list) ->
+                item(key = "day-$day") {
+                    DayHeaderCard(
+                        day = day,
+                        list = list,
+                        expanded = expandedDays[day] == true,
+                        onClick = { expandedDays[day] = expandedDays[day] != true }
+                    )
+                }
+                if (expandedDays[day] == true) {
+                    if (identity.role == DeviceRole.DRIVER) {
+                        // 送气工：保持现状，直接列出自己当天的记录，不按员工分组
+                        items(list, key = { it.id }) { record ->
+                            RecordCard(
+                                record = record,
+                                canEdit = false,
+                                onEdit = { editingRecord = record },
+                                onUpdate = saveRecord
+                            )
+                        }
+                    } else {
+                        // 营业员/站长：先按员工分"当天总结"卡片，展开后再列该员工明细
+                        val dayByEmployee = list.groupBy { it.employeeName }
+                            .mapValues { (_, l) -> l }
+                            .toList()
+                            .sortedByDescending { (_, l) -> l.sumOf { it.quantity } }
+                        dayByEmployee.forEach { (name, empList) ->
+                            val empKey = "$day:$name"
+                            item(key = "emp-$empKey") {
+                                EmployeeDaySummaryCard(
+                                    employeeName = name,
+                                    list = empList,
+                                    expanded = expandedEmployees[empKey] == true,
+                                    onClick = { expandedEmployees[empKey] = expandedEmployees[empKey] != true }
+                                )
+                            }
+                            if (expandedEmployees[empKey] == true) {
+                                items(empList, key = { it.id }) { record ->
+                                    RecordCard(
+                                        record = record,
+                                        canEdit = true,
+                                        onEdit = { editingRecord = record },
+                                        onUpdate = saveRecord
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
 
-        item {
-            Spacer(Modifier.height(4.dp))
-            Text("最近记录", fontSize = 21.sp, fontWeight = FontWeight.Bold)
-        }
-        items(records.take(30), key = { "recent-${it.id}" }) { record ->
-            SimpleRecordCard(record)
+    editingRecord?.let { record ->
+        EditDeliveryRecordDialog(
+            record = record,
+            onDismiss = { editingRecord = null },
+            onSave = { updated ->
+                scope.launch {
+                    DeliveryRecordRepository(
+                        db.deliveryRecordDao(),
+                        MainActivity.cloudClient
+                    ).update(updated)
+                    editingRecord = null
+                }
+            }
+        )
+    }
+
+}
+
+@Composable
+private fun DayHeaderCard(day: Long, list: List<DeliveryRecord>, expanded: Boolean, onClick: () -> Unit) {
+    val dayTitle = remember(day) { SimpleDateFormat("M月d日 EEEE", Locale.CHINESE).format(Date(day)) }
+    val qty = list.sumOf { it.quantity }
+    val amount = list.sumOf { it.totalAmount }
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(dayTitle, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text(if (expanded) "▲" else "▼", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("${list.size}条 · ${qty}瓶 · ¥${String.format("%.0f", amount)}", fontSize = 16.sp)
         }
     }
 }
 
 @Composable
-private fun DebtRecordCard(record: DeliveryRecord) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun EmployeeDaySummaryCard(employeeName: String, list: List<DeliveryRecord>, expanded: Boolean, onClick: () -> Unit) {
+    val qty = list.sumOf { it.quantity }
+    val amount = list.sumOf { it.totalAmount }
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(record.employeeName, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text(employeeName.ifBlank { "未命名" }, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(if (expanded) "▲" else "▼", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("${list.size}条 · ${qty}瓶 · ¥${String.format("%.0f", amount)}", fontSize = 16.sp)
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RecordCard(
+    record: DeliveryRecord,
+    canEdit: Boolean,
+    onEdit: () -> Unit,
+    onUpdate: (DeliveryRecord) -> Unit
+) {
+    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
+    val exchangeSeg = exchangeSegment(record.notes)
+    val pureExchange = isPureExchange(record.notes)
+    val notesShown = notesWithoutExtracted(record.notes)
+    val rentalSeg = rentalSegment(record.notes)
+    val exchangeYearInfo = exchangeSeg?.let { parseYearInfo(it) } ?: emptyList()
+    // 解析 returnedYear：新格式 "年份:已回数" 空格分隔；老格式 "、"分隔年份集合（整个年份已回）
+    val returnedCounts = parseReturnedCounts(record.returnedYear, exchangeYearInfo).toMutableMap()
+    // 老数据兜底：returnedYear 为空但 exchangeStatus 为 RETURNED → 全部年份按已回处理
+    if (record.returnedYear.isBlank() && record.exchangeStatus == "RETURNED") {
+        exchangeYearInfo.forEach { (y, total) -> returnedCounts[y] = total }
+    }
+    val newCount = bottleSegment(record.notes, "新瓶")?.let { parseBottleCount(it) }
+    val smallCount = bottleSegment(record.notes, "小瓶")?.let { parseBottleCount(it) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // 第一行：员工名（左）+ 总金额（右，纯对瓶不显示 ¥0）
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(record.employeeName.ifBlank { "未命名" }, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                if (!pureExchange) {
+                    Text("¥${String.format("%.0f", record.totalAmount)}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            // 第二行：时间（MM-dd HH:mm），小字灰色
+            Text(
+                timeFormat.format(Date(record.date)),
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            // 第三行：总数量
+            Text("${record.quantity}瓶", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            // 收款行：现金 + 微信 + 增加/减去，只显示非零/存在的项，强制单行（微信 = 总金额 - 现金）
+            val wechatPay = (record.totalAmount - record.cashAmount).coerceAtLeast(0.0)
+            val addSeg = bottleSegment(record.notes, "增加")
+            val subSeg = bottleSegment(record.notes, "减去")
+            val payParts = mutableListOf<String>().apply {
+                if (record.cashAmount > 0) add("现金 ¥${String.format("%.0f", record.cashAmount)}")
+                if (wechatPay > 0) add("微信 ¥${String.format("%.0f", wechatPay)}")
+                if (addSeg != null) add("增加 " + addSeg.removePrefix("增加:").trim())
+                if (subSeg != null) add("减去 " + subSeg.removePrefix("减去:").trim())
+            }
+            if (payParts.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    payParts.forEach { part ->
+                        Text(part, fontSize = 16.sp)
+                    }
+                }
+            }
+            // 租瓶行
+            if (rentalSeg != null) {
+                val obj = parseObjectName(rentalSeg)
+                val yearInfo = formatYearInfo(parseYearInfo(rentalSeg))
                 Text(
-                    "欠 ¥${String.format("%.0f", record.debtAmount)}",
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold
+                    when {
+                        obj.isNotBlank() && yearInfo.isNotBlank() -> "租瓶：$obj $yearInfo"
+                        obj.isNotBlank() -> "租瓶：$obj"
+                        else -> "租瓶：$yearInfo"
+                    },
+                    fontSize = 16.sp
                 )
             }
-            if (record.notes.isNotBlank()) Text(record.notes, maxLines = 2)
+            // 新瓶/小瓶行
+            val newSmallParts = mutableListOf<String>().apply {
+                if (newCount != null) add("新瓶 ${newCount}个")
+                if (smallCount != null) add("小瓶 ${smallCount}个")
+            }
+            if (newSmallParts.isNotEmpty()) {
+                Text(newSmallParts.joinToString("　　"), fontSize = 16.sp)
+            }
+            // 对瓶行：年份列表（不显示括号/总数，单瓶只显示年份）
+            if (exchangeSeg != null) {
+                if (exchangeYearInfo.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Text("对瓶：", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        FlowRow(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            exchangeYearInfo.forEach { (year, count) ->
+                                Text(
+                                    if (count <= 1) year else "$year${count}个",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // 解析不出年份（括号缺失等异常）时回退到原样
+                    Text(exchangeSeg, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            // 对瓶状态区：逐年份 已回 X 未回 Y（canEdit 时带 已回+1/已回-1 按钮）
+            if (exchangeSeg != null) {
+                if (exchangeYearInfo.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        exchangeYearInfo.forEach { (year, total) ->
+                            val returned = (returnedCounts[year] ?: 0).coerceIn(0, total)
+                            ExchangeYearStatus(
+                                year = year,
+                                total = total,
+                                returnedCount = returned,
+                                clickable = canEdit,
+                                onAddReturned = {
+                                    if (returned < total) {
+                                        val next = returnedCounts + (year to returned + 1)
+                                        val allDone = exchangeYearInfo.all { (y, t) -> (next[y] ?: 0) >= t }
+                                        onUpdate(
+                                            record.copy(
+                                                exchangeStatus = if (allDone) "RETURNED" else "PENDING",
+                                                returnedYear = exchangeYearInfo.joinToString(" ") { (y, _) -> "$y:${next[y] ?: 0}" }
+                                            )
+                                        )
+                                    }
+                                },
+                                onSubReturned = {
+                                    if (returned > 0) {
+                                        val next = returnedCounts + (year to returned - 1)
+                                        val allDone = exchangeYearInfo.all { (y, t) -> (next[y] ?: 0) >= t }
+                                        onUpdate(
+                                            record.copy(
+                                                exchangeStatus = if (allDone) "RETURNED" else "PENDING",
+                                                returnedYear = exchangeYearInfo.joinToString(" ") { (y, _) -> "$y:${next[y] ?: 0}" }
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                } else if (record.exchangeStatus == "PENDING" || record.exchangeStatus == "RETURNED") {
+                    Text(
+                        if (record.exchangeStatus == "RETURNED") "已回" else "未回",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (record.exchangeStatus == "RETURNED")
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            // 备注（去掉对瓶/租瓶/新瓶/小瓶段后的剩余内容）
+            if (notesShown.isNotBlank()) {
+                Text(notesShown.removePrefix("备注:").trim(), maxLines = 2)
+            }
+            // 按钮行：修改
+            if (canEdit) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onEdit) {
+                        Text("修改", fontSize = 18.sp)
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun SimpleRecordCard(record: DeliveryRecord) {
-    val format = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(record.employeeName, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(format.format(Date(record.date)))
+private fun ExchangeYearStatus(
+    year: String,
+    total: Int,
+    returnedCount: Int,
+    clickable: Boolean,
+    onAddReturned: () -> Unit,
+    onSubReturned: () -> Unit
+) {
+    val returned = returnedCount.coerceIn(0, total)
+    val remaining = total - returned
+    // 对瓶按钮颜色：已回=深绿，未回=error 红
+    val green = Color(0xFF2E7D32)
+    val errorColor = MaterialTheme.colorScheme.error
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 单瓶只显示年份+切换按钮，不显示"已回 X 未回 Y"计数
+        if (total > 1) {
+            Text(
+                buildAnnotatedString {
+                    append("$year 已回 ")
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)) {
+                        append("$returned")
+                    }
+                    append(" 未回 ")
+                    withStyle(SpanStyle(color = errorColor, fontWeight = FontWeight.Bold)) {
+                        append("$remaining")
+                    }
+                },
+                fontSize = 16.sp
+            )
+        } else {
+            if (clickable) {
+                // 营业员/站长：单瓶只显示年份，状态由切换按钮表达
+                Text("$year", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            } else {
+                // 送气工：只读显示年份 + 已回/未回状态
+                val isReturned = returned >= total
+                Text(
+                    buildAnnotatedString {
+                        append("$year ")
+                        withStyle(SpanStyle(color = if (isReturned) green else errorColor, fontWeight = FontWeight.Bold)) {
+                            append(if (isReturned) "已回" else "未回")
+                        }
+                    },
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
-            Text("${record.quantity}瓶　¥${String.format("%.0f", record.totalAmount)}")
-            if (record.debtAmount > 0) {
-                Text("未收 ¥${String.format("%.0f", record.debtAmount)}", color = MaterialTheme.colorScheme.error)
+        }
+        if (clickable) {
+            if (total <= 1) {
+                // 单瓶：一个切换按钮，已回/未回互切
+                val isReturned = returned >= total
+                OutlinedButton(
+                    onClick = if (isReturned) onSubReturned else onAddReturned,
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (isReturned) errorColor else green
+                    )
+                ) {
+                    Text(if (isReturned) "未回" else "已回", fontSize = 14.sp)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onAddReturned,
+                    enabled = returned < total,
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = green)
+                ) {
+                    Text("已回+1", fontSize = 14.sp)
+                }
+                OutlinedButton(
+                    onClick = onSubReturned,
+                    enabled = returned > 0,
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = errorColor)
+                ) {
+                    Text("已回-1", fontSize = 14.sp)
+                }
             }
         }
     }
 }
+
+/** 解析 returnedYear 得到每个年份的已回数量。
+ * 新格式：空格分隔的 "年份:已回数"，如 "22厂:1 23检:2"；
+ * 老格式："、"分隔的年份集合，如 "22检、23检"，该年份整体已回（已回数 = 该年份总数）。
+ * 返回 Map<年份, 已回数>，未出现的年份视为 0（不在 map 里）。
+ */
+private fun parseReturnedCounts(returnedYear: String, years: List<Pair<String, Int>>): Map<String, Int> {
+    val totals = years.toMap()
+    val result = mutableMapOf<String, Int>()
+    if (returnedYear.isBlank()) return result
+    returnedYear.split(" ").filter { it.isNotBlank() }.forEach { seg ->
+        if (seg.contains(":")) {
+            val idx = seg.lastIndexOf(':')
+            val year = seg.substring(0, idx).trim()
+            val count = seg.substring(idx + 1).trim().toIntOrNull() ?: 0
+            if (year.isNotBlank()) result[year] = count
+        } else {
+            // 老格式：按 "、" 拆成年份，每个年份视为整体已回
+            seg.split("、").filter { it.isNotBlank() }.forEach { y ->
+                result[y] = totals[y] ?: 1
+            }
+        }
+    }
+    return result
+}
+
+@Composable
+private fun EditDeliveryRecordDialog(
+    record: DeliveryRecord,
+    onDismiss: () -> Unit,
+    onSave: (DeliveryRecord) -> Unit
+) {
+    var quantityText by remember { mutableStateOf(record.quantity.toString()) }
+    var totalText by remember { mutableStateOf(if (record.totalAmount == 0.0) "" else String.format("%.0f", record.totalAmount)) }
+    var cashText by remember { mutableStateOf(if (record.cashAmount == 0.0) "" else String.format("%.0f", record.cashAmount)) }
+    var wechatText by remember { mutableStateOf(if (record.wechatAmount == 0.0) "" else String.format("%.0f", record.wechatAmount)) }
+    var notes by remember { mutableStateOf(record.notes) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("修改记录", fontSize = 24.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                OutlinedTextField(
+                    value = quantityText,
+                    onValueChange = { quantityText = it },
+                    label = { Text("数量") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                OutlinedTextField(
+                    value = totalText,
+                    onValueChange = { totalText = it },
+                    label = { Text("总金额") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                OutlinedTextField(
+                    value = cashText,
+                    onValueChange = { cashText = it },
+                    label = { Text("现金收款") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                OutlinedTextField(
+                    value = wechatText,
+                    onValueChange = { wechatText = it },
+                    label = { Text("微信收款") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("备注") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val cash = cashText.toDoubleOrNull() ?: 0.0
+                val wechat = wechatText.toDoubleOrNull() ?: 0.0
+                val total = totalText.toDoubleOrNull() ?: record.totalAmount
+                val debt = (total - cash - wechat).coerceAtLeast(0.0)
+                onSave(
+                    record.copy(
+                        quantity = quantityText.toIntOrNull() ?: record.quantity,
+                        totalAmount = total,
+                        cashAmount = cash,
+                        wechatAmount = wechat,
+                        debtAmount = debt,
+                        notes = notes.trim()
+                    )
+                )
+            }) { Text("保存", fontSize = 19.sp) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/** 从 notes 里解析"对瓶:"段，返回原样段（如 "对瓶: 3瓶 (22检:1个 23检:2个)"），没有则返回 null。 */
+private fun exchangeSegment(notes: String): String? =
+    notes.split(" | ").firstOrNull { it.trim().startsWith("对瓶:") }?.trim()
+
+/** 是否纯对瓶记录：除了对瓶段和备注段外没有其他瓶子段。 */
+private fun isPureExchange(notes: String): Boolean {
+    if (exchangeSegment(notes) == null) return false
+    return notes.split(" | ").none {
+        val t = it.trim()
+        t.isNotBlank() && !t.startsWith("对瓶:") && !t.startsWith("备注:") && t.contains("瓶:")
+    }
+}
+
+/** 从 notes 里解析指定前缀的段（如 "新瓶:"/"小瓶:"/"租瓶:"），返回原样段，没有则返回 null。 */
+private fun bottleSegment(notes: String, prefix: String): String? =
+    notes.split(" | ").firstOrNull { it.trim().startsWith("$prefix:") }?.trim()
+
+/** 租瓶段，如 "租瓶: 2瓶 (22检:1个 23检:1个) [对象: 张三]"。 */
+private fun rentalSegment(notes: String): String? = bottleSegment(notes, "租瓶")
+
+/** 从瓶子段里解析对象名 "[对象: xxx]"，没有则返回空串。 */
+private fun parseObjectName(segment: String): String =
+    Regex("""\[对象:\s*([^\]]*)]""").find(segment)?.groupValues?.get(1)?.trim() ?: ""
+
+/** 从段内 "(...)" 里解析 year:count 列表，如 "22检:1个 23检:2个" -> [("22检",1),("23检",2)]。 */
+private fun parseYearInfo(segment: String): List<Pair<String, Int>> {
+    val paren = Regex("""\(([^)]*)\)""").find(segment)?.groupValues?.get(1) ?: return emptyList()
+    return paren.split(" ").map { it.trim() }.filter { it.isNotBlank() }.mapNotNull { token ->
+        val idx = token.lastIndexOf(':')
+        if (idx <= 0) return@mapNotNull null
+        val year = token.substring(0, idx).trim()
+        val count = token.substring(idx + 1).trim().removeSuffix("个").trim().toIntOrNull() ?: 1
+        if (year.isBlank()) null else year to count
+    }
+}
+
+/** 格式化年份信息：count==1 只显示年份，count>1 显示 "年份:count个"，多个用空格分隔。 */
+private fun formatYearInfo(years: List<Pair<String, Int>>): String =
+    years.joinToString(" ") { (y, c) -> if (c <= 1) y else "$y:${c}个" }
+
+/** 从段里解析瓶子数量（N瓶 的 N）。 */
+private fun parseBottleCount(segment: String): Int? =
+    Regex("""(\d+)瓶""").find(segment)?.groupValues?.get(1)?.toIntOrNull()
+
+/** 去掉对瓶/租瓶/新瓶/小瓶/重瓶段，避免和卡片上方专行显示重复。 */
+private fun notesWithoutExtracted(notes: String): String =
+    notes.split(" | ").filterNot { seg ->
+        val t = seg.trim()
+        listOf("对瓶", "租瓶", "新瓶", "小瓶", "重瓶", "增加", "减去").any { t.startsWith("$it:") }
+    }.joinToString(" | ").trim()

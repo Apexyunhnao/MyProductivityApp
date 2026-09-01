@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -66,7 +67,8 @@ fun V2RecordScreen() {
     var rentalCustomer by remember { mutableStateOf("") }
 
     var cashText by remember { mutableStateOf("") }
-    var wechatText by remember { mutableStateOf("") }
+    var extraText by remember { mutableStateOf("") }
+    var prepayText by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -146,9 +148,11 @@ fun V2RecordScreen() {
         fresh * (prices[BottleType.NEW] ?: 0) +
         small * (prices[BottleType.SMALL] ?: 0)
 
+    val extra = extraText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+    val prepay = prepayText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+    val receivable = (total + extra - prepay).coerceAtLeast(0.0)
     val cash = cashText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
-    val wechat = wechatText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
-    val debt = (total - cash - wechat).coerceAtLeast(0.0)
+    val wechat = (receivable - cash).coerceAtLeast(0.0)
     val marks = years.map { "${it.year}${it.type}" }.distinct()
 
     fun reset() {
@@ -159,7 +163,8 @@ fun V2RecordScreen() {
         exchangeMarks.clear()
         rentalCustomer = ""
         cashText = ""
-        wechatText = ""
+        extraText = ""
+        prepayText = ""
         note = ""
         rentalImagePath = ""
         noteImagePath = ""
@@ -174,10 +179,7 @@ fun V2RecordScreen() {
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("记一笔", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("先点谁送的，再记数量和收款。", style = MaterialTheme.typography.bodyLarge)
-
-            Title("1  谁送的")
+            Title("送气人员")
             if (employees.isEmpty()) {
                 Text("还没有员工，请先到右上角设置里添加。")
             } else {
@@ -192,7 +194,6 @@ fun V2RecordScreen() {
                 }
             }
 
-            Title("2  瓶子")
             SimpleCounter(
                 title = "重瓶",
                 help = priceText(prices[BottleType.HEAVY] ?: 0),
@@ -235,24 +236,24 @@ fun V2RecordScreen() {
                 plus = { small++ }
             )
 
-            Title("3  收了多少钱")
+            Title("金额核算")
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("瓶子合计", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    MoneyField("增加 +¥", extraText) { extraText = it }
+                    MoneyField("减去 -¥", prepayText) { prepayText = it }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("合计", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text("¥$total", fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                        Text("总金额", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("¥" + String.format("%.0f", receivable), fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     }
                     MoneyField("现金", cashText) { cashText = it }
-                    MoneyField("微信", wechatText) { wechatText = it }
-                    if (debt > 0) {
+                    if (wechat > 0) {
                         Text(
-                            "还欠 ¥${String.format("%.0f", debt)}",
-                            color = MaterialTheme.colorScheme.error,
-                            fontSize = 21.sp,
+                            "微信 ¥${String.format("%.0f", wechat)}",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
-                    } else if (cash + wechat > 0) {
-                        Text("已结清", color = MaterialTheme.colorScheme.primary, fontSize = 19.sp)
                     }
                 }
             }
@@ -290,6 +291,8 @@ fun V2RecordScreen() {
                                 if (exchangeQty > 0) notes += "对瓶: ${exchangeQty}瓶 (${marksText(exchangeMarks)})"
                                 if (fresh > 0) notes += "新瓶: ${fresh}瓶 × ¥${prices[BottleType.NEW] ?: 0}"
                                 if (small > 0) notes += "小瓶: ${small}瓶 × ¥${prices[BottleType.SMALL] ?: 0}"
+                                if (extra > 0) notes += "增加: ¥${String.format("%.0f", extra)}"
+                                if (prepay > 0) notes += "减去: ¥${String.format("%.0f", prepay)}"
                                 if (note.isNotBlank()) notes += "备注: $note"
 
                                 val recordId = recordRepo.save(
@@ -301,10 +304,10 @@ fun V2RecordScreen() {
                                         bottleType = "MIXED",
                                         quantity = totalQty,
                                         pricePerUnit = if (totalQty > 0) total.toDouble() / totalQty else 0.0,
-                                        totalAmount = total.toDouble(),
+                                        totalAmount = receivable,
                                         cashAmount = cash,
                                         wechatAmount = wechat,
-                                        debtAmount = debt,
+                                        debtAmount = 0.0,
                                         date = System.currentTimeMillis(),
                                         notes = notes.joinToString(" | "),
                                         exchangeStatus = if (exchangeQty > 0) "PENDING" else "NONE",
@@ -404,43 +407,58 @@ private fun MarkCounter(
     photoPath: String = "",
     onTakePhoto: () -> Unit = {}
 ) {
+    var expanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-            Text(help)
-            if (customer != null) {
-                OutlinedTextField(
-                    value = customer,
-                    onValueChange = onCustomer,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("租给谁") },
-                    singleLine = true
-                )
-                if (photoLabel != null) {
-                    PhotoSlotButton(label = photoLabel, photoPath = photoPath, onTakePhoto = onTakePhoto)
+            Row(
+                Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    Text(help)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${counts.values.sum()} 个", fontWeight = FontWeight.Bold)
+                    Text(if (expanded) "▲" else "▼")
                 }
             }
-            if (marks.isEmpty()) {
-                Text("还没有设置厂/检年份，请到设置里添加。")
-            }
-            marks.forEach { mark ->
-                val qty = counts[mark] ?: 0
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(mark, Modifier.weight(1f), fontSize = 19.sp, fontWeight = FontWeight.Medium)
-                    FilledTonalIconButton(
-                        onClick = { if (qty > 0) counts[mark] = qty - 1 },
-                        enabled = qty > 0
-                    ) {
-                        Icon(Icons.Default.Remove, "减1")
-                    }
-                    Text(
-                        qty.toString(),
-                        modifier = Modifier.widthIn(min = 46.dp),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
+            if (expanded) {
+                if (customer != null) {
+                    OutlinedTextField(
+                        value = customer,
+                        onValueChange = onCustomer,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("租给谁") },
+                        singleLine = true
                     )
-                    FilledTonalIconButton(onClick = { counts[mark] = qty + 1 }) {
-                        Icon(Icons.Default.Add, "加1")
+                    if (photoLabel != null) {
+                        PhotoSlotButton(label = photoLabel, photoPath = photoPath, onTakePhoto = onTakePhoto)
+                    }
+                }
+                if (marks.isEmpty()) {
+                    Text("还没有设置厂/检年份，请到设置里添加。")
+                }
+                marks.forEach { mark ->
+                    val qty = counts[mark] ?: 0
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(mark, Modifier.weight(1f), fontSize = 19.sp, fontWeight = FontWeight.Medium)
+                        FilledTonalIconButton(
+                            onClick = { if (qty > 0) counts[mark] = qty - 1 },
+                            enabled = qty > 0
+                        ) {
+                            Icon(Icons.Default.Remove, "减1")
+                        }
+                        Text(
+                            qty.toString(),
+                            modifier = Modifier.widthIn(min = 46.dp),
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        FilledTonalIconButton(onClick = { counts[mark] = qty + 1 }) {
+                            Icon(Icons.Default.Add, "加1")
+                        }
                     }
                 }
             }

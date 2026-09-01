@@ -21,6 +21,7 @@ import com.example.myproductivityapp.data.repository.EmployeeRepository
 @Composable
 fun V2IdentitySetupScreen(
     client: RemoteDataClient,
+    needConfirm: Boolean = false,
     onConfigured: (DeviceIdentity) -> Unit
 ) {
     val context = LocalContext.current
@@ -28,6 +29,8 @@ fun V2IdentitySetupScreen(
     val repo = remember { EmployeeRepository(db.employeeDao(), client) }
     var employees by remember { mutableStateOf<List<Employee>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    // 待确认的送气工：点击名字先弹确认，确认后才锁定为送气工身份
+    var pendingDriver by remember { mutableStateOf<Employee?>(null) }
 
     LaunchedEffect(Unit) {
         runCatching { repo.syncFromCloud() }
@@ -91,14 +94,19 @@ fun V2IdentitySetupScreen(
                 items(employees, key = { it.id }) { employee ->
                     OutlinedButton(
                         onClick = {
-                            onConfigured(
-                                DeviceIdentity(
-                                    role = DeviceRole.DRIVER,
-                                    employeeId = employee.id,
-                                    employeeRemoteId = employee.firestoreId,
-                                    employeeName = employee.name
+                            if (needConfirm) {
+                                pendingDriver = employee
+                            } else {
+                                // 首次设置直接绑定，不弹确认
+                                onConfigured(
+                                    DeviceIdentity(
+                                        role = DeviceRole.DRIVER,
+                                        employeeId = employee.id,
+                                        employeeRemoteId = employee.firestoreId,
+                                        employeeName = employee.name
+                                    )
                                 )
-                            )
+                            }
                         },
                         modifier = Modifier.fillMaxWidth().height(58.dp)
                     ) {
@@ -107,5 +115,34 @@ fun V2IdentitySetupScreen(
                 }
             }
         }
+    }
+
+    pendingDriver?.let { driver ->
+        AlertDialog(
+            onDismissRequest = { pendingDriver = null },
+            title = { Text("确认选送气工", fontSize = 22.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "选了送气工后，这台手机就锁定为 ${driver.name}，之后不能自己切换身份（送气工只能看待办和统计）。确定要选吗？",
+                    fontSize = 19.sp
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onConfigured(
+                        DeviceIdentity(
+                            role = DeviceRole.DRIVER,
+                            employeeId = driver.id,
+                            employeeRemoteId = driver.firestoreId,
+                            employeeName = driver.name
+                        )
+                    )
+                    pendingDriver = null
+                }) { Text("确定", fontSize = 19.sp) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDriver = null }) { Text("取消") }
+            }
+        )
     }
 }

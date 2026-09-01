@@ -17,6 +17,10 @@ class DeliveryTaskRepository(
     fun observeOpenTasksForEmployeeRemote(employeeRemoteId: String): Flow<List<DeliveryTask>> =
         dao.observeOpenTasksForEmployeeRemote(employeeRemoteId)
 
+    fun observeCompletedTasks(): Flow<List<DeliveryTask>> = dao.observeCompletedTasks()
+    fun observeCompletedTasksForEmployeeRemote(employeeRemoteId: String): Flow<List<DeliveryTask>> =
+        dao.observeCompletedTasksForEmployeeRemote(employeeRemoteId)
+
     suspend fun save(task: DeliveryTask): Long = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val entity = task.copy(updatedAt = now, synced = false)
@@ -38,6 +42,13 @@ class DeliveryTaskRepository(
 
     suspend fun update(task: DeliveryTask) = withContext(Dispatchers.IO) {
         save(task)
+    }
+
+    suspend fun delete(task: DeliveryTask) = withContext(Dispatchers.IO) {
+        dao.deleteTask(task)
+        try {
+            if (task.firestoreId.isNotBlank()) client.delete(table, task.firestoreId)
+        } catch (_: Exception) { }
     }
 
     suspend fun syncFromCloud() = withContext(Dispatchers.IO) {

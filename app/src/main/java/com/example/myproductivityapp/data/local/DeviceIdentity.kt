@@ -37,10 +37,20 @@ class DeviceIdentityManager(context: Context) {
             .putLong("employee_id", identity.employeeId ?: -1L)
             .putString("employee_remote_id", identity.employeeRemoteId)
             .putString("employee_name", identity.employeeName)
+            .putBoolean("identity_configured_before", true)
             .apply()
     }
 
     fun clear() {
-        prefs.edit().clear().apply()
+        // 只清身份字段，保留 identity_configured_before 标记（换身份时仍要确认）
+        prefs.edit()
+            .remove("role")
+            .remove("employee_id")
+            .remove("employee_remote_id")
+            .remove("employee_name")
+            .apply()
     }
+
+    /** 这台手机是否曾经配置过身份（首次设置=false，之后换身份=true） */
+    fun hasIdentityBefore(): Boolean = prefs.getBoolean("identity_configured_before", false)
 }
