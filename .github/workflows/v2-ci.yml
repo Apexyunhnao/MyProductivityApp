@@ -3,8 +3,6 @@ name: V2 CI
 on:
   push:
     branches: [v2-redesign]
-  pull_request:
-    branches: [master]
   workflow_dispatch:
 
 jobs:
