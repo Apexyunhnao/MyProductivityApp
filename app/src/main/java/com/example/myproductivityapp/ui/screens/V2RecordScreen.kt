@@ -65,6 +65,9 @@ fun V2RecordScreen() {
     val rentalMarks = remember { mutableStateMapOf<String, Int>() }
     val exchangeMarks = remember { mutableStateMapOf<String, Int>() }
     var rentalCustomer by remember { mutableStateOf("") }
+    // 自定义瓶型（价格设置里添加的，如"中瓶"）：类型名 -> 数量
+    var extraPrices by remember { mutableStateOf<List<PriceConfig>>(emptyList()) }
+    val extraCounts = remember { mutableStateMapOf<String, Int>() }
 
     var cashText by remember { mutableStateOf("") }
     var extraText by remember { mutableStateOf("") }
@@ -132,21 +135,28 @@ fun V2RecordScreen() {
         yearRepo.observeAll().collect { years = it.distinctBy { y -> "${y.year}-${y.type}" } }
     }
     LaunchedEffect(Unit) {
+        val all = priceRepo.getAllOnce()
         val loaded = mutableMapOf<BottleType, Int>()
         BottleType.values().forEach { type ->
-            loaded[type] = priceRepo.getByType(type.name)?.price ?: 0
+            loaded[type] = all.find { it.bottleType == type.name }?.price ?: 0
         }
         prices = loaded
+        // 自定义瓶型：price_config 里不在内置 enum 名字里的
+        extraPrices = all.filter { !BottleTypes.isBuiltin(it.bottleType) }.sortedBy { it.bottleType }
     }
 
+    val extraQty = extraCounts.values.sum()
     val rentalQty = rentalMarks.values.sum()
     val exchangeQty = exchangeMarks.values.sum()
-    val totalQty = heavy + rentalQty + exchangeQty + fresh + small
+    val totalQty = heavy + rentalQty + exchangeQty + fresh + small + extraQty
     val total =
         heavy * (prices[BottleType.HEAVY] ?: 0) +
         rentalQty * (prices[BottleType.RENTAL] ?: 0) +
         fresh * (prices[BottleType.NEW] ?: 0) +
-        small * (prices[BottleType.SMALL] ?: 0)
+        small * (prices[BottleType.SMALL] ?: 0) +
+        extraCounts.entries.sumOf { (type, qty) ->
+            qty * (extraPrices.firstOrNull { it.bottleType == type }?.price ?: 0)
+        }
 
     val extra = extraText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
     val prepay = prepayText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
@@ -161,6 +171,7 @@ fun V2RecordScreen() {
         small = 0
         rentalMarks.clear()
         exchangeMarks.clear()
+        extraCounts.clear()
         rentalCustomer = ""
         cashText = ""
         extraText = ""
@@ -236,6 +247,20 @@ fun V2RecordScreen() {
                 plus = { small++ }
             )
 
+            if (extraPrices.isNotEmpty()) {
+                Title("其他瓶型")
+                extraPrices.forEach { cfg ->
+                    val qty = extraCounts[cfg.bottleType] ?: 0
+                    SimpleCounter(
+                        title = BottleTypes.displayName(cfg.bottleType),
+                        help = priceText(cfg.price),
+                        qty = qty,
+                        minus = { if (qty > 0) extraCounts[cfg.bottleType] = qty - 1 },
+                        plus = { extraCounts[cfg.bottleType] = qty + 1 }
+                    )
+                }
+            }
+
             Title("金额核算")
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -291,6 +316,10 @@ fun V2RecordScreen() {
                                 if (exchangeQty > 0) notes += "对瓶: ${exchangeQty}瓶 (${marksText(exchangeMarks)})"
                                 if (fresh > 0) notes += "新瓶: ${fresh}瓶 × ¥${prices[BottleType.NEW] ?: 0}"
                                 if (small > 0) notes += "小瓶: ${small}瓶 × ¥${prices[BottleType.SMALL] ?: 0}"
+                                extraPrices.forEach { cfg ->
+                                    val q = extraCounts[cfg.bottleType] ?: 0
+                                    if (q > 0) notes += "${cfg.bottleType}: ${q}瓶 × ¥${cfg.price}"
+                                }
                                 if (extra > 0) notes += "增加: ¥${String.format("%.0f", extra)}"
                                 if (prepay > 0) notes += "减去: ¥${String.format("%.0f", prepay)}"
                                 if (note.isNotBlank()) notes += "备注: $note"

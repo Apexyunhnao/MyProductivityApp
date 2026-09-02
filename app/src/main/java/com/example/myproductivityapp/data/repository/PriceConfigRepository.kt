@@ -14,6 +14,7 @@ class PriceConfigRepository(
     private val table = "price_config"
 
     fun observeAll(): Flow<List<PriceConfig>> = dao.getAllPrices()
+    suspend fun getAllOnce(): List<PriceConfig> = dao.getAllOnce()
     suspend fun getByType(bottleType: String): PriceConfig? = dao.getPriceByType(bottleType)
 
     suspend fun save(config: PriceConfig) = withContext(Dispatchers.IO) {

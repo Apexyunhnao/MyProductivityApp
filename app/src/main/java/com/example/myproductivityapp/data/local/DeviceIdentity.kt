@@ -12,7 +12,8 @@ data class DeviceIdentity(
     val role: DeviceRole,
     val employeeId: Long? = null,
     val employeeRemoteId: String = "",
-    val employeeName: String = ""
+    val employeeName: String = "",
+    val phone: String = ""
 )
 
 /**
@@ -28,7 +29,8 @@ class DeviceIdentityManager(context: Context) {
         val employeeId = prefs.getLong("employee_id", -1L).takeIf { it > 0L }
         val employeeRemoteId = prefs.getString("employee_remote_id", "").orEmpty()
         val employeeName = prefs.getString("employee_name", "").orEmpty()
-        return DeviceIdentity(role, employeeId, employeeRemoteId, employeeName)
+        val phone = prefs.getString("phone", "").orEmpty()
+        return DeviceIdentity(role, employeeId, employeeRemoteId, employeeName, phone)
     }
 
     fun save(identity: DeviceIdentity) {
@@ -37,6 +39,7 @@ class DeviceIdentityManager(context: Context) {
             .putLong("employee_id", identity.employeeId ?: -1L)
             .putString("employee_remote_id", identity.employeeRemoteId)
             .putString("employee_name", identity.employeeName)
+            .putString("phone", identity.phone)
             .putBoolean("identity_configured_before", true)
             .apply()
     }
@@ -48,6 +51,7 @@ class DeviceIdentityManager(context: Context) {
             .remove("employee_id")
             .remove("employee_remote_id")
             .remove("employee_name")
+            .remove("phone")
             .apply()
     }
 

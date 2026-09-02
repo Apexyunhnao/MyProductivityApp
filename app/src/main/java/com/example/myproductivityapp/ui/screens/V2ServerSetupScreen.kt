@@ -14,7 +14,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun V2ServerSetupScreen(
     initial: ServerConfig? = null,
-    onConnected: (ServerConfig) -> Unit
+    onConnected: (ServerConfig) -> Unit,
+    onSkip: () -> Unit = {}
 ) {
     var url by remember { mutableStateOf(initial?.baseUrl ?: "http://192.168.1.100:8000") }
     var apiKey by remember { mutableStateOf(initial?.apiKey ?: "gas-station-local") }
@@ -28,7 +29,7 @@ fun V2ServerSetupScreen(
     ) {
         Text("连接新站服务器", fontSize = 29.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
-        Text("这一步只需要配置一次。小主机和手机要先连在同一个网络测试。", fontSize = 18.sp)
+        Text("不连接也能用（先存本机，连上后自动同步）。这一步只需要配置一次。小主机和手机要先连在同一个网络测试。", fontSize = 18.sp)
         Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(
@@ -80,6 +81,14 @@ fun V2ServerSetupScreen(
             enabled = !checking
         ) {
             Text(if (checking) "正在测试连接…" else "测试并保存", fontSize = 21.sp)
+        }
+
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onSkip,
+            modifier = Modifier.fillMaxWidth().height(54.dp)
+        ) {
+            Text("先跳过（纯本地使用，之后可在设置里连）", fontSize = 17.sp)
         }
     }
 }

@@ -27,6 +27,9 @@ interface EmployeeDao {
     @Query("SELECT * FROM employees WHERE employeeId = :employeeId")
     suspend fun getEmployeeByEmployeeId(employeeId: String): Employee?
 
+    @Query("SELECT * FROM employees WHERE phoneNumber = :phone LIMIT 1")
+    suspend fun getEmployeeByPhone(phone: String): Employee?
+
     @Query("SELECT * FROM employees WHERE firestoreId = :firestoreId LIMIT 1")
     suspend fun getByFirestoreId(firestoreId: String): Employee?
 

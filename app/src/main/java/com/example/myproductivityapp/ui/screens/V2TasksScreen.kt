@@ -31,7 +31,7 @@ import java.util.*
 
 /**
  * V2 待办：录入极简，只记事情 + 任务类型(送气/收瓶) + 派给谁。
- * - 营业员/站长：看全站待办；建待办必须选一个送气员。
+ * - 营业员/站长：看全站待办；建待办必须选一个送气员。不发待办的人不点完成——完成按钮只有送气工有。
  * - 送气员：只看派给自己的待办；自己记的自动归自己。
  * 页面分「未完成」「已完成」两块，全部角色都可修改/删除。
  */
@@ -115,18 +115,20 @@ fun V2TasksScreen(identity: DeviceIdentity) {
                             task = task,
                             isDriver = isDriver,
                             isCompleted = false,
-                            onComplete = {
-                                scope.launch {
-                                    db.deliveryTaskDao().update(
-                                        task.copy(
-                                            status = TaskStatus.COMPLETED.name,
-                                            completedAt = System.currentTimeMillis(),
-                                            updatedAt = System.currentTimeMillis(),
-                                            synced = false
+                            onComplete = if (isDriver) {
+                                {
+                                    scope.launch {
+                                        db.deliveryTaskDao().update(
+                                            task.copy(
+                                                status = TaskStatus.COMPLETED.name,
+                                                completedAt = System.currentTimeMillis(),
+                                                updatedAt = System.currentTimeMillis(),
+                                                synced = false
+                                            )
                                         )
-                                    )
+                                    }
                                 }
-                            },
+                            } else null,
                             onEdit = { editingTask = task },
                             onDelete = { deletingTask = task }
                         )

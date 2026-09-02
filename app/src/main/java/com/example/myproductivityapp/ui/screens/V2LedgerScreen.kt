@@ -4,7 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -342,6 +344,14 @@ private fun RecordCard(
             if (newSmallParts.isNotEmpty()) {
                 Text(newSmallParts.joinToString("　　"), fontSize = 16.sp)
             }
+            // 自定义瓶型行（价格设置里添加的类型，如"中瓶"）：只显示类型和数量，不带金额
+            val extraParts = extraBottleParts(record.notes)
+            if (extraParts.isNotEmpty()) {
+                Text(
+                    extraParts.joinToString("　　") { "${it.first}：${it.second}瓶" },
+                    fontSize = 16.sp
+                )
+            }
             // 对瓶行：年份列表（不显示括号/总数，单瓶只显示年份）
             if (exchangeSeg != null) {
                 if (exchangeYearInfo.isNotEmpty()) {
@@ -443,78 +453,34 @@ private fun ExchangeYearStatus(
 ) {
     val returned = returnedCount.coerceIn(0, total)
     val remaining = total - returned
-    // 对瓶按钮颜色：已回=深绿，未回=error 红
+    // 对瓶按钮颜色：未回=error 红，已回=深绿
     val green = Color(0xFF2E7D32)
     val errorColor = MaterialTheme.colorScheme.error
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        // 单瓶只显示年份+切换按钮，不显示"已回 X 未回 Y"计数
-        if (total > 1) {
-            Text(
-                buildAnnotatedString {
-                    append("$year 已回 ")
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)) {
-                        append("$returned")
-                    }
-                    append(" 未回 ")
-                    withStyle(SpanStyle(color = errorColor, fontWeight = FontWeight.Bold)) {
-                        append("$remaining")
-                    }
-                },
-                fontSize = 16.sp
-            )
-        } else {
-            if (clickable) {
-                // 营业员/站长：单瓶只显示年份，状态由切换按钮表达
-                Text("$year", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            } else {
-                // 送气工：只读显示年份 + 已回/未回状态
-                val isReturned = returned >= total
-                Text(
-                    buildAnnotatedString {
-                        append("$year ")
-                        withStyle(SpanStyle(color = if (isReturned) green else errorColor, fontWeight = FontWeight.Bold)) {
-                            append(if (isReturned) "已回" else "未回")
-                        }
-                    },
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("$year", fontSize = 17.sp, fontWeight = FontWeight.Medium)
         if (clickable) {
-            if (total <= 1) {
-                // 单瓶：一个切换按钮，已回/未回互切
-                val isReturned = returned >= total
-                OutlinedButton(
-                    onClick = if (isReturned) onSubReturned else onAddReturned,
-                    modifier = Modifier.height(32.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (isReturned) errorColor else green
-                    )
-                ) {
-                    Text(if (isReturned) "未回" else "已回", fontSize = 14.sp)
-                }
-            } else {
-                OutlinedButton(
-                    onClick = onAddReturned,
-                    enabled = returned < total,
-                    modifier = Modifier.height(32.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = green)
-                ) {
-                    Text("已回+1", fontSize = 14.sp)
-                }
-                OutlinedButton(
-                    onClick = onSubReturned,
-                    enabled = returned > 0,
-                    modifier = Modifier.height(32.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = errorColor)
-                ) {
-                    Text("已回-1", fontSize = 14.sp)
-                }
+            // 营业员/站长：一个按钮。未回 N>0 → 显示（未回N），点一下已回+1；
+            // 全部已回 → 显示（已回），不可再点（按错了用卡片上的“修改”按钮改回）。
+            OutlinedButton(
+                onClick = onAddReturned,
+                enabled = remaining > 0,
+                modifier = Modifier.height(38.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (remaining > 0) errorColor else green,
+                    disabledContentColor = green
+                )
+            ) {
+                Text(if (remaining > 0) "未回$remaining" else "已回", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
+        } else {
+            // 送气工：只读显示状态文字
+            Text(
+                if (remaining > 0) "未回$remaining" else "已回",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (remaining > 0) errorColor else green
+            )
         }
     }
 }
@@ -555,12 +521,24 @@ private fun EditDeliveryRecordDialog(
     var cashText by remember { mutableStateOf(if (record.cashAmount == 0.0) "" else String.format("%.0f", record.cashAmount)) }
     var wechatText by remember { mutableStateOf(if (record.wechatAmount == 0.0) "" else String.format("%.0f", record.wechatAmount)) }
     var notes by remember { mutableStateOf(record.notes) }
+    // 对瓶归还编辑：从 notes 解析标记+总数，已回数可 +/- 调整
+    val exchangeYears = remember(record) {
+        exchangeSegment(record.notes)?.let { parseYearInfo(it) } ?: emptyList()
+    }
+    val returnedCounts = remember(record) {
+        mutableStateMapOf<String, Int>().apply {
+            parseReturnedCounts(record.returnedYear, exchangeYears).forEach { (y, c) -> put(y, c) }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("修改记录", fontSize = 24.sp, fontWeight = FontWeight.Bold) },
         text = {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
                 OutlinedTextField(
                     value = quantityText,
                     onValueChange = { quantityText = it },
@@ -605,6 +583,35 @@ private fun EditDeliveryRecordDialog(
                     minLines = 2,
                     textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
                 )
+                if (exchangeYears.isNotEmpty()) {
+                    Divider()
+                    Text("对瓶归还（按错了在这里改）", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    exchangeYears.forEach { (year, total) ->
+                        val returned = (returnedCounts[year] ?: 0).coerceIn(0, total)
+                        val remaining = total - returned
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (remaining > 0) "$year 未回$remaining" else "$year 已回",
+                                Modifier.weight(1f),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (remaining > 0) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
+                            )
+                            TextButton(
+                                onClick = { if (returned > 0) returnedCounts[year] = returned - 1 },
+                                enabled = returned > 0
+                            ) { Text("−", fontSize = 22.sp) }
+                            Text("已回 $returned / $total", fontSize = 15.sp)
+                            TextButton(
+                                onClick = { if (returned < total) returnedCounts[year] = returned + 1 },
+                                enabled = returned < total
+                            ) { Text("+", fontSize = 22.sp) }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -613,6 +620,7 @@ private fun EditDeliveryRecordDialog(
                 val wechat = wechatText.toDoubleOrNull() ?: 0.0
                 val total = totalText.toDoubleOrNull() ?: record.totalAmount
                 val debt = (total - cash - wechat).coerceAtLeast(0.0)
+                val hasExchange = exchangeYears.isNotEmpty()
                 onSave(
                     record.copy(
                         quantity = quantityText.toIntOrNull() ?: record.quantity,
@@ -620,7 +628,13 @@ private fun EditDeliveryRecordDialog(
                         cashAmount = cash,
                         wechatAmount = wechat,
                         debtAmount = debt,
-                        notes = notes.trim()
+                        notes = notes.trim(),
+                        exchangeStatus = if (hasExchange) {
+                            if (exchangeYears.all { (y, t) -> (returnedCounts[y] ?: 0) >= t }) "RETURNED" else "PENDING"
+                        } else record.exchangeStatus,
+                        returnedYear = if (hasExchange) {
+                            exchangeYears.joinToString(" ") { (y, _) -> "$y:${returnedCounts[y] ?: 0}" }
+                        } else record.returnedYear
                     )
                 )
             }) { Text("保存", fontSize = 19.sp) }
@@ -675,9 +689,27 @@ private fun formatYearInfo(years: List<Pair<String, Int>>): String =
 private fun parseBottleCount(segment: String): Int? =
     Regex("""(\d+)瓶""").find(segment)?.groupValues?.get(1)?.toIntOrNull()
 
-/** 去掉对瓶/租瓶/新瓶/小瓶/重瓶段，避免和卡片上方专行显示重复。 */
+/** 内置瓶型的显示名（notes 段里的中文名）。 */
+private val BUILTIN_BOTTLE_NAMES = setOf("对瓶", "租瓶", "重瓶", "新瓶", "小瓶")
+
+/** 从 notes 解析自定义瓶型段："对新: 5瓶 × ¥70" -> [("对新", 5)]。内置类型不算。 */
+private fun extraBottleParts(notes: String): List<Pair<String, Int>> {
+    // 类型名不限"瓶"结尾（用户可能起"对新"这种名），只要是 "名字: N瓶 × ¥价" 格式
+    val re = Regex("""^([^:]+):\s*(\d+)瓶\s*×\s*¥\d+""")
+    return notes.split(" | ").mapNotNull { seg ->
+        val t = seg.trim()
+        val m = re.find(t) ?: return@mapNotNull null
+        val name = m.groupValues[1].trim()
+        if (name in BUILTIN_BOTTLE_NAMES) null
+        else name to (m.groupValues[2].toIntOrNull() ?: 0)
+    }.filter { it.second > 0 }
+}
+
+/** 去掉瓶子段/增加/减去段，避免和卡片上方专行显示重复。
+ * 瓶型段统一识别为 "名字: N瓶" 开头（内置+自定义都算），类型名不限"瓶"结尾。 */
 private fun notesWithoutExtracted(notes: String): String =
     notes.split(" | ").filterNot { seg ->
         val t = seg.trim()
-        listOf("对瓶", "租瓶", "新瓶", "小瓶", "重瓶", "增加", "减去").any { t.startsWith("$it:") }
+        t.startsWith("增加:") || t.startsWith("减去:") ||
+            Regex("""^[^:]+:\s*\d+瓶""").containsMatchIn(t)
     }.joinToString(" | ").trim()

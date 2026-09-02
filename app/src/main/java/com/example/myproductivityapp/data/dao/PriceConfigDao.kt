@@ -9,6 +9,9 @@ interface PriceConfigDao {
     @Query("SELECT * FROM price_config")
     fun getAllPrices(): Flow<List<PriceConfig>>
 
+    @Query("SELECT * FROM price_config")
+    suspend fun getAllOnce(): List<PriceConfig>
+
     @Query("SELECT * FROM price_config WHERE bottleType = :bottleType")
     suspend fun getPriceByType(bottleType: String): PriceConfig?
 
