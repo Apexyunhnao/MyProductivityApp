@@ -8,12 +8,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = BASE_DIR / "data" / "gas_station.db"
 DB_PATH = Path(os.getenv("GAS_STATION_DB_PATH", str(DEFAULT_DB))).resolve()
 API_KEY = os.getenv("GAS_STATION_API_KEY", "gas-station-local")
+IMAGE_DIR = Path(os.getenv("GAS_STATION_IMAGE_DIR", str(BASE_DIR / "images"))).resolve()
+MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15MB 上限（压缩后实际几百KB）
 
 ALLOWED_RESOURCES = {
     "employees",
@@ -67,6 +70,7 @@ def init_db() -> None:
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def require_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -180,3 +184,23 @@ def stats() -> dict[str, int]:
             "SELECT resource, COUNT(*) AS n FROM sync_objects GROUP BY resource"
         ).fetchall()
     return {row["resource"]: row["n"] for row in rows}
+
+
+# 照片静态目录：GET /images/xxx.jpg 无需 API Key（文件名是随机 uuid，不可枚举），供 App 直接加载
+if not IMAGE_DIR.exists():
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/images", StaticFiles(directory=str(IMAGE_DIR)), name="images")
+
+
+@app.post("/api-meta/upload_image", dependencies=[Depends(require_key)])
+async def upload_image(request: Request) -> dict[str, str]:
+    """上传压缩后的照片（body 为原始字节，jpg）。返回可直接访问的完整 URL。"""
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty body")
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="image too large")
+    name = f"{uuid.uuid4().hex}.jpg"
+    (IMAGE_DIR / name).write_bytes(raw)
+    base = str(request.base_url).rstrip("/")
+    return {"url": f"{base}/images/{name}"}

@@ -23,6 +23,8 @@ data class DeliveryRecord(
     val firestoreId: String = "",
     val employeeFirestoreId: String = "",
     val imageUrl: String = "",
+    // v10：服务器照片 URL 列表（| 分隔，顺序=押金单、现场单据）；本机原图仍在 imagePath/imageUrl(本地路径)
+    val remoteImages: String = "",
     val updatedAt: Long = System.currentTimeMillis(),
     val synced: Boolean = true,
     val exchangeStatus: String = "NONE",

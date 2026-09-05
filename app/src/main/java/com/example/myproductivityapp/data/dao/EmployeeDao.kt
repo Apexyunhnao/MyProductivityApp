@@ -36,6 +36,9 @@ interface EmployeeDao {
     @Query("SELECT * FROM employees WHERE synced = 0")
     suspend fun getUnsynced(): List<Employee>
 
+    @Query("DELETE FROM employees WHERE synced = 1 AND firestoreId != '' AND firestoreId NOT IN (:cloudIds)")
+    suspend fun deleteRemoteMissing(cloudIds: List<String>)
+
     @Query("UPDATE employees SET synced = 0")
     suspend fun resetRemoteSyncForLocalServer()
 }

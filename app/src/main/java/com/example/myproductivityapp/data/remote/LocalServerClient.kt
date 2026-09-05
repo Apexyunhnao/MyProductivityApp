@@ -66,6 +66,27 @@ class LocalServerClient(
         Unit
     }
 
+    /** 上传压缩后照片（jpg 字节）到服务器，返回完整可访问 URL；失败返回 null。 */
+    override suspend fun uploadImage(bytes: ByteArray): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = bytes.toRequestBody("image/jpeg".toMediaType())
+            val req = Request.Builder()
+                .url("$base/api-meta/upload_image")
+                .header("X-API-Key", apiKey)
+                .post(body)
+                .build()
+            val text = client.newCall(req).execute().use { res ->
+                val t = res.body?.string().orEmpty()
+                if (!res.isSuccessful) throw IllegalStateException("HTTP ${res.code}: $t")
+                t
+            }
+            val map = gson.fromJson(text, Map::class.java) as? Map<*, *> ?: return@withContext null
+            (map["url"] ?: "").toString().takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun authorized(builder: Request.Builder): Request.Builder =
         builder.header("X-API-Key", apiKey).header("Content-Type", "application/json")
 

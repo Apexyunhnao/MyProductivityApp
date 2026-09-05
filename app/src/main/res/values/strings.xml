@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">煤气站配送管理</string>
+    <string name="app_name">久隆煤气</string>
     <string name="employee_management">员工管理</string>
     <string name="delivery_record">配送记录</string>
     <string name="price_settings">价格设置</string>

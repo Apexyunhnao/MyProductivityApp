@@ -35,6 +35,12 @@ interface DeliveryTaskDao {
 
     @Query("SELECT * FROM delivery_tasks WHERE synced = 0")
     suspend fun getUnsynced(): List<DeliveryTask>
+
+    @Query("DELETE FROM delivery_tasks WHERE synced = 1 AND firestoreId != '' AND firestoreId NOT IN (:cloudIds)")
+    suspend fun deleteRemoteMissing(cloudIds: List<String>)
+
+    @Query("SELECT * FROM delivery_tasks WHERE remoteImages = '' AND imagePath != '' ORDER BY createdAt ASC")
+    suspend fun getPhotoPending(): List<DeliveryTask>
 }
 
 @Dao

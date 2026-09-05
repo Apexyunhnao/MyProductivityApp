@@ -1,5 +1,6 @@
 package com.example.myproductivityapp.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -20,13 +22,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.myproductivityapp.MainActivity
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.local.DeviceIdentity
 import com.example.myproductivityapp.data.local.DeviceRole
 import com.example.myproductivityapp.data.model.DeliveryRecord
+import com.example.myproductivityapp.data.remote.PhotoUtil
 import com.example.myproductivityapp.data.repository.DeliveryRecordRepository
+import com.example.myproductivityapp.ui.components.PhotoViewerDialog
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -37,6 +43,14 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
     val scope = rememberCoroutineScope()
     var records by remember { mutableStateOf<List<DeliveryRecord>>(emptyList()) }
     var editingRecord by remember { mutableStateOf<DeliveryRecord?>(null) }
+    var deletingRecord by remember { mutableStateOf<DeliveryRecord?>(null) }
+    // 删除提交中锁：防止网络卡顿时连点删除重复提交
+    var deleting by remember { mutableStateOf(false) }
+    // 筛选：关键词 / 时间范围 / 排序（新→旧=倒序默认）
+    var searchText by remember { mutableStateOf("") }
+    var fromDateText by remember { mutableStateOf("") }
+    var toDateText by remember { mutableStateOf("") }
+    var sortDesc by remember { mutableStateOf(true) }
     // 营业员/站长保存改动的记录（含年份级对瓶切换），写本地 + 云端
     val saveRecord: (DeliveryRecord) -> Unit = { updated ->
         scope.launch {
@@ -74,18 +88,46 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
     }
+
+    // 日期文本 yyyy-MM-dd -> 当天毫秒；endOfDay=true 取当天 23:59:59；空/非法=不限
+    fun dayMillis(text: String, endOfDay: Boolean): Long? {
+        if (text.isBlank()) return null
+        val parts = text.trim().split("-")
+        if (parts.size != 3) return null
+        val y = parts[0].toIntOrNull() ?: return null
+        val mo = parts[1].toIntOrNull() ?: return null
+        val d = parts[2].toIntOrNull() ?: return null
+        val cal = Calendar.getInstance().apply {
+            clear()
+            set(y, mo - 1, d, if (endOfDay) 23 else 0, if (endOfDay) 59 else 0, if (endOfDay) 59 else 0)
+        }
+        return cal.timeInMillis
+    }
+    val fromMs = dayMillis(fromDateText, false)
+    val toMs = dayMillis(toDateText, true)
+    val keyword = searchText.trim()
+    // 全部记录按筛选条件过滤 + 排序（DAO 本身 date DESC，正序时反转）
+    val visibleRecords = records.filter { rec ->
+        val inRange = (fromMs == null || rec.date >= fromMs) && (toMs == null || rec.date <= toMs)
+        val hit = keyword.isEmpty() ||
+            rec.employeeName.contains(keyword) ||
+            rec.notes.contains(keyword) ||
+            String.format("%.0f", rec.totalAmount).contains(keyword)
+        inRange && hit
+    }.let { if (sortDesc) it else it.asReversed() }
+
     val todayTitle = remember {
         SimpleDateFormat("M月d日 EEEE", Locale.CHINESE).format(Date())
     }
-    val todayRecords = records.filter { it.date >= startOfDay }
-    val todayQty = todayRecords.sumOf { it.quantity }
+    val todayRecords = visibleRecords.filter { it.date >= startOfDay }
+    val todayQty = todayRecords.sumOf { recordMainQty(it) }
     val todayAmount = todayRecords.sumOf { it.totalAmount }
 
-    // 以往记录按天分组（key=当天零点），分组按天倒序；组内沿用 records 本身 date DESC 顺序。
-    val dayGroups = remember(records) {
+    // 以往记录按天分组（key=当天零点），分组按天倒序；组内沿用记录本身顺序。
+    val dayGroups = remember(visibleRecords) {
         val map = LinkedHashMap<Long, MutableList<DeliveryRecord>>()
         val cal = Calendar.getInstance()
-        for (rec in records) {
+        for (rec in visibleRecords) {
             cal.timeInMillis = rec.date
             cal.set(Calendar.HOUR_OF_DAY, 0)
             cal.set(Calendar.MINUTE, 0)
@@ -106,6 +148,48 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("搜员工/备注/金额") },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(fontSize = 17.sp)
+                    )
+                    OutlinedButton(onClick = { sortDesc = !sortDesc }) {
+                        Text(if (sortDesc) "新→旧 ↓" else "旧→新 ↑", fontSize = 15.sp)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = fromDateText,
+                        onValueChange = { fromDateText = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("从 2026-09-01") },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp)
+                    )
+                    OutlinedTextField(
+                        value = toDateText,
+                        onValueChange = { toDateText = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("到 2026-09-30") },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp)
+                    )
+                }
+                if (searchText.isNotBlank() || fromDateText.isNotBlank() || toDateText.isNotBlank()) {
+                    TextButton(onClick = {
+                        searchText = ""
+                        fromDateText = ""
+                        toDateText = ""
+                    }) { Text("清除筛选", fontSize = 15.sp) }
+                }
+            }
+        }
         item {
             Text("今天", fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Text(
@@ -128,7 +212,7 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
         }
 
         val byEmployee = todayRecords.groupBy { it.employeeName }
-            .mapValues { (_, list) -> Pair(list.sumOf { it.quantity }, list.sumOf { it.totalAmount }) }
+            .mapValues { (_, list) -> Pair(list.sumOf { recordMainQty(it) }, list.sumOf { it.totalAmount }) }
             .toList()
             .sortedByDescending { it.second.first }
 
@@ -153,7 +237,7 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
             Spacer(Modifier.height(4.dp))
             Text("以往记录", fontSize = 21.sp, fontWeight = FontWeight.Bold)
         }
-        if (records.isEmpty()) {
+        if (visibleRecords.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Text("还没有记录", modifier = Modifier.padding(16.dp), fontSize = 18.sp)
@@ -185,7 +269,7 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
                         val dayByEmployee = list.groupBy { it.employeeName }
                             .mapValues { (_, l) -> l }
                             .toList()
-                            .sortedByDescending { (_, l) -> l.sumOf { it.quantity } }
+                            .sortedByDescending { (_, l) -> l.sumOf { recordMainQty(it) } }
                         dayByEmployee.forEach { (name, empList) ->
                             val empKey = "$day:$name"
                             item(key = "emp-$empKey") {
@@ -202,7 +286,8 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
                                         record = record,
                                         canEdit = true,
                                         onEdit = { editingRecord = record },
-                                        onUpdate = saveRecord
+                                        onUpdate = saveRecord,
+                                        onDelete = { deletingRecord = record }
                                     )
                                 }
                             }
@@ -219,12 +304,57 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
             onDismiss = { editingRecord = null },
             onSave = { updated ->
                 scope.launch {
-                    DeliveryRecordRepository(
-                        db.deliveryRecordDao(),
-                        MainActivity.cloudClient
-                    ).update(updated)
+                    try {
+                        val cloudOk = DeliveryRecordRepository(
+                            db.deliveryRecordDao(),
+                            MainActivity.cloudClient
+                        ).updateWithResult(updated)
+                        Toast.makeText(
+                            context,
+                            if (cloudOk) "修改成功" else "修改已保存，服务器没连上，稍后自动同步",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "保存失败：${e.message ?: "未知错误"}", Toast.LENGTH_LONG).show()
+                    }
                     editingRecord = null
                 }
+            }
+        )
+    }
+
+    deletingRecord?.let { record ->
+        AlertDialog(
+            onDismissRequest = { if (!deleting) deletingRecord = null },
+            title = { Text("删除这条记录？", fontSize = 22.sp, fontWeight = FontWeight.Bold) },
+            text = { Text("删除后手机和服务器都会移除，无法恢复。", fontSize = 18.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deleting = true
+                        scope.launch {
+                            try {
+                                val cloudOk = DeliveryRecordRepository(
+                                    db.deliveryRecordDao(),
+                                    MainActivity.cloudClient
+                                ).deleteWithResult(record)
+                                Toast.makeText(
+                                    context,
+                                    if (cloudOk) "删除成功" else "已删除，服务器没连上，稍后自动同步",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "删除失败：${e.message ?: "未知错误"}", Toast.LENGTH_LONG).show()
+                            }
+                            deletingRecord = null
+                            deleting = false
+                        }
+                    },
+                    enabled = !deleting
+                ) { Text(if (deleting) "删除中…" else "删除", fontSize = 19.sp) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingRecord = null }, enabled = !deleting) { Text("取消") }
             }
         )
     }
@@ -234,7 +364,7 @@ fun V2LedgerScreen(identity: DeviceIdentity) {
 @Composable
 private fun DayHeaderCard(day: Long, list: List<DeliveryRecord>, expanded: Boolean, onClick: () -> Unit) {
     val dayTitle = remember(day) { SimpleDateFormat("M月d日 EEEE", Locale.CHINESE).format(Date(day)) }
-    val qty = list.sumOf { it.quantity }
+    val qty = list.sumOf { recordMainQty(it) }
     val amount = list.sumOf { it.totalAmount }
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -249,7 +379,7 @@ private fun DayHeaderCard(day: Long, list: List<DeliveryRecord>, expanded: Boole
 
 @Composable
 private fun EmployeeDaySummaryCard(employeeName: String, list: List<DeliveryRecord>, expanded: Boolean, onClick: () -> Unit) {
-    val qty = list.sumOf { it.quantity }
+    val qty = list.sumOf { recordMainQty(it) }
     val amount = list.sumOf { it.totalAmount }
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -268,8 +398,11 @@ private fun RecordCard(
     record: DeliveryRecord,
     canEdit: Boolean,
     onEdit: () -> Unit,
-    onUpdate: (DeliveryRecord) -> Unit
+    onUpdate: (DeliveryRecord) -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
+    // 点按照片放大查看（记录可能有多张照片，记住点的是哪张；URL 或本地文件均可）
+    var zoomPhoto by remember { mutableStateOf<Any?>(null) }
     val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val exchangeSeg = exchangeSegment(record.notes)
     val pureExchange = isPureExchange(record.notes)
@@ -300,8 +433,8 @@ private fun RecordCard(
                 fontSize = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            // 第三行：总数量
-            Text("${record.quantity}瓶", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            // 第三行：总数量（重瓶+小瓶=销售瓶数；纯对瓶/租瓶/自定义单回退原数量）
+            Text("${recordMainQty(record)}瓶", fontSize = 26.sp, fontWeight = FontWeight.Bold)
             // 收款行：现金 + 微信 + 增加/减去，只显示非零/存在的项，强制单行（微信 = 总金额 - 现金）
             val wechatPay = (record.totalAmount - record.cashAmount).coerceAtLeast(0.0)
             val addSeg = bottleSegment(record.notes, "增加")
@@ -430,9 +563,49 @@ private fun RecordCard(
             if (notesShown.isNotBlank()) {
                 Text(notesShown.removePrefix("备注:").trim(), maxLines = 2)
             }
-            // 按钮行：修改
+            // 照片：优先服务器 URL（跨手机可见，压缩图加载快）；未上传的本机照片按本地路径显示
+            val remoteUrls = PhotoUtil.remoteUrlList(record.remoteImages)
+            val recordPhotos = if (remoteUrls.isNotEmpty()) {
+                remoteUrls
+            } else {
+                listOfNotNull(
+                    record.imagePath.takeIf { it.isNotBlank() },
+                    record.imageUrl.takeIf { it.isNotBlank() }
+                ).distinct()
+            }
+            if (recordPhotos.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    recordPhotos.forEach { p ->
+                        val model: Any? = if (p.startsWith("http")) p else File(p).takeIf { it.exists() }
+                        if (model != null) {
+                            AsyncImage(
+                                model = model,
+                                contentDescription = "记录照片，点按放大",
+                                modifier = Modifier
+                                    .size(width = 120.dp, height = 90.dp)
+                                    .clickable { zoomPhoto = model },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "点按照片可放大",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (zoomPhoto != null) {
+                PhotoViewerDialog(imageData = zoomPhoto, onDismiss = { zoomPhoto = null })
+            }
+            // 按钮行：修改 / 删除
             if (canEdit) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (onDelete != null) {
+                        TextButton(onClick = onDelete) {
+                            Text("删除", fontSize = 18.sp, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                     TextButton(onClick = onEdit) {
                         Text("修改", fontSize = 18.sp)
                     }
@@ -520,7 +693,16 @@ private fun EditDeliveryRecordDialog(
     var totalText by remember { mutableStateOf(if (record.totalAmount == 0.0) "" else String.format("%.0f", record.totalAmount)) }
     var cashText by remember { mutableStateOf(if (record.cashAmount == 0.0) "" else String.format("%.0f", record.cashAmount)) }
     var wechatText by remember { mutableStateOf(if (record.wechatAmount == 0.0) "" else String.format("%.0f", record.wechatAmount)) }
-    var notes by remember { mutableStateOf(record.notes) }
+    // 备注框只编辑"备注:"段正文；瓶型/金额段原样保留，保存时重组
+    val otherSegs = remember(record) {
+        record.notes.split(" | ").filter { it.trim().isNotBlank() && !it.trim().startsWith("备注:") }
+    }
+    var noteText by remember {
+        mutableStateOf(
+            record.notes.split(" | ").firstOrNull { it.trim().startsWith("备注:") }
+                ?.substringAfter("备注:")?.trim() ?: ""
+        )
+    }
     // 对瓶归还编辑：从 notes 解析标记+总数，已回数可 +/- 调整
     val exchangeYears = remember(record) {
         exchangeSegment(record.notes)?.let { parseYearInfo(it) } ?: emptyList()
@@ -530,6 +712,8 @@ private fun EditDeliveryRecordDialog(
             parseReturnedCounts(record.returnedYear, exchangeYears).forEach { (y, c) -> put(y, c) }
         }
     }
+    // 提交中锁：防止网络卡顿时连点保存重复提交
+    var saving by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -576,9 +760,9 @@ private fun EditDeliveryRecordDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
                 OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("备注") },
+                    value = noteText,
+                    onValueChange = { noteText = it },
+                    label = { Text("备注（记情况，如：26厂拿错成25厂）") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     textStyle = LocalTextStyle.current.copy(fontSize = 21.sp)
@@ -615,29 +799,37 @@ private fun EditDeliveryRecordDialog(
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val cash = cashText.toDoubleOrNull() ?: 0.0
-                val wechat = wechatText.toDoubleOrNull() ?: 0.0
-                val total = totalText.toDoubleOrNull() ?: record.totalAmount
-                val debt = (total - cash - wechat).coerceAtLeast(0.0)
-                val hasExchange = exchangeYears.isNotEmpty()
-                onSave(
-                    record.copy(
-                        quantity = quantityText.toIntOrNull() ?: record.quantity,
-                        totalAmount = total,
-                        cashAmount = cash,
-                        wechatAmount = wechat,
-                        debtAmount = debt,
-                        notes = notes.trim(),
-                        exchangeStatus = if (hasExchange) {
-                            if (exchangeYears.all { (y, t) -> (returnedCounts[y] ?: 0) >= t }) "RETURNED" else "PENDING"
-                        } else record.exchangeStatus,
-                        returnedYear = if (hasExchange) {
-                            exchangeYears.joinToString(" ") { (y, _) -> "$y:${returnedCounts[y] ?: 0}" }
-                        } else record.returnedYear
-                    )
-                )
-            }) { Text("保存", fontSize = 19.sp) }
+            Button(
+                onClick = {
+                    if (!saving) {
+                        saving = true
+                        val cash = cashText.toDoubleOrNull() ?: 0.0
+                        val wechat = wechatText.toDoubleOrNull() ?: 0.0
+                        val total = totalText.toDoubleOrNull() ?: record.totalAmount
+                        val debt = (total - cash - wechat).coerceAtLeast(0.0)
+                        val hasExchange = exchangeYears.isNotEmpty()
+                        onSave(
+                            record.copy(
+                                quantity = quantityText.toIntOrNull() ?: record.quantity,
+                                totalAmount = total,
+                                cashAmount = cash,
+                                wechatAmount = wechat,
+                                debtAmount = debt,
+                                notes = buildList {
+                                    addAll(otherSegs)
+                                    if (noteText.trim().isNotBlank()) add("备注: ${noteText.trim()}")
+                                }.joinToString(" | "),
+                                exchangeStatus = if (hasExchange) {
+                                    if (exchangeYears.all { (y, t) -> (returnedCounts[y] ?: 0) >= t }) "RETURNED" else "PENDING"
+                                } else record.exchangeStatus,
+                                returnedYear = if (hasExchange) {
+                                    exchangeYears.joinToString(" ") { (y, _) -> "$y:${returnedCounts[y] ?: 0}" }
+                                } else record.returnedYear
+                            )
+                        )
+                    }
+                }
+            ) { Text(if (saving) "保存中…" else "保存", fontSize = 19.sp) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
@@ -713,3 +905,15 @@ private fun notesWithoutExtracted(notes: String): String =
         t.startsWith("增加:") || t.startsWith("减去:") ||
             Regex("""^[^:]+:\s*\d+瓶""").containsMatchIn(t)
     }.joinToString(" | ").trim()
+
+/**
+ * 卡片主数量：重瓶 + 小瓶（销售瓶数）。
+ * 没有重瓶/小瓶的纯附属记录（对瓶/租瓶/自定义瓶型单）回退原总数量，避免显示 0。
+ * 例子：1 重瓶 + 1 新瓶 -> 卡片大字 1，明细行另有 "新瓶 1个"。
+ */
+private fun recordMainQty(record: DeliveryRecord): Int {
+    val heavy = bottleSegment(record.notes, "重瓶")?.let { parseBottleCount(it) } ?: 0
+    val small = bottleSegment(record.notes, "小瓶")?.let { parseBottleCount(it) } ?: 0
+    val main = heavy + small
+    return if (main > 0) main else record.quantity
+}

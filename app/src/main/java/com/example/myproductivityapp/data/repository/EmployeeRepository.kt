@@ -64,6 +64,9 @@ class EmployeeRepository(
                 synced = true
             ))
         }
+        // 删除对账：本地已同步但云端已不存在的记录 → 本地删除（他机删除同步过来）
+        val cloudIds = docs.mapNotNull { (it["id"] ?: it["_id"]).toString().takeIf { id -> id.isNotBlank() } }
+        dao.deleteRemoteMissing(cloudIds.ifEmpty { listOf("__none__") })
     }
 
     suspend fun pushUnsynced() {

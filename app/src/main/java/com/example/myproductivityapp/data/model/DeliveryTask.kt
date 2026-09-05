@@ -35,7 +35,13 @@ data class DeliveryTask(
     val completedAt: Long? = null,
     val firestoreId: String = "",
     val updatedAt: Long = System.currentTimeMillis(),
-    val synced: Boolean = false
+    val synced: Boolean = false,
+    // v9：瓶子归还状态（营业员/站长建待办时标记）——""=普通，"NOT_RETURNED"=瓶未回，"RETURNED"=瓶已回
+    val bottleStatus: String = "",
+    // v9：待办照片（本地文件路径；图片文件本身不同步，仅路径跨机可见）
+    val imagePath: String = "",
+    // v10：服务器照片 URL（本机原图仍在 imagePath）
+    val remoteImages: String = ""
 )
 
 enum class TaskType {

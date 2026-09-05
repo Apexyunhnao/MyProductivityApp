@@ -264,8 +264,9 @@ fun V2MainScreen(
                             Icon(Icons.Default.Settings, contentDescription = "设置")
                         }
                     } else {
-                        // 送气工：待办/统计页也能配置服务器（登录后才能连，断网也能用）
+                        // 送气工：待办/统计页也能配置服务器（登录后才能连，断网也能用）+ 退出登录
                         TextButton(onClick = onChangeServer) { Text("服务器") }
+                        TextButton(onClick = onChangeIdentity) { Text("退出登录") }
                     }
                 }
             )

@@ -35,6 +35,7 @@ import com.example.myproductivityapp.data.repository.BottleYearRepository
 import com.example.myproductivityapp.data.repository.DeliveryRecordRepository
 import com.example.myproductivityapp.data.repository.EmployeeRepository
 import com.example.myproductivityapp.data.repository.PriceConfigRepository
+import com.example.myproductivityapp.ui.components.PhotoViewerDialog
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -324,7 +325,7 @@ fun V2RecordScreen() {
                                 if (prepay > 0) notes += "减去: ¥${String.format("%.0f", prepay)}"
                                 if (note.isNotBlank()) notes += "备注: $note"
 
-                                val recordId = recordRepo.save(
+                                val saveResult = recordRepo.saveWithResult(
                                     DeliveryRecord(
                                         employeeId = selected.id,
                                         employeeName = selected.name,
@@ -344,6 +345,8 @@ fun V2RecordScreen() {
                                         imageUrl = noteImagePath
                                     )
                                 )
+                                val recordId = saveResult.first
+                                val cloudOk = saveResult.second
 
                                 val details = buildBottleDetails(
                                     recordId = recordId,
@@ -357,7 +360,10 @@ fun V2RecordScreen() {
                                 )
                                 if (details.isNotEmpty()) db.bottleDetailDao().upsertAll(details)
                                 reset()
-                                snackbar.showSnackbar("已保存")
+                                snackbar.showSnackbar(
+                                    if (cloudOk) "已保存" else "已保存，服务器没连上，稍后自动同步",
+                                    duration = SnackbarDuration.Long
+                                )
                             } catch (e: Exception) {
                                 snackbar.showSnackbar("保存失败：${e.message ?: "未知错误"}")
                             } finally {
@@ -501,6 +507,8 @@ private fun PhotoSlotButton(
     photoPath: String,
     onTakePhoto: () -> Unit
 ) {
+    // 点按预览照片放大查看
+    var zoomPhoto by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onTakePhoto, modifier = Modifier.fillMaxWidth()) {
@@ -513,7 +521,9 @@ private fun PhotoSlotButton(
                     AsyncImage(
                         model = File(photoPath),
                         contentDescription = label,
-                        modifier = Modifier.size(width = 110.dp, height = 82.dp),
+                        modifier = Modifier
+                            .size(width = 110.dp, height = 82.dp)
+                            .clickable { zoomPhoto = true },
                         contentScale = ContentScale.Crop
                     )
                     Text(
@@ -524,6 +534,9 @@ private fun PhotoSlotButton(
                 }
             }
         }
+    }
+    if (zoomPhoto && photoPath.isNotBlank()) {
+        PhotoViewerDialog(imageData = File(photoPath), onDismiss = { zoomPhoto = false })
     }
 }
 

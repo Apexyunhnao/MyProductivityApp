@@ -22,7 +22,7 @@ import com.example.myproductivityapp.data.model.*
         Policy::class,
         StationDuty::class
     ],
-    version = 8,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -168,6 +168,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE delivery_tasks ADD COLUMN bottleStatus TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE delivery_tasks ADD COLUMN imagePath TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // 跨手机照片：服务器照片 URL 列表（本地原图路径不动）
+                database.execSQL("ALTER TABLE delivery_records ADD COLUMN remoteImages TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE delivery_tasks ADD COLUMN remoteImages TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -181,7 +196,9 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
-                    MIGRATION_7_8
+                    MIGRATION_7_8,
+                    MIGRATION_8_9,
+                    MIGRATION_9_10
                 ).build()
                 INSTANCE = instance
                 instance

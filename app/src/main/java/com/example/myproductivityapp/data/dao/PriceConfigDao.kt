@@ -30,6 +30,9 @@ interface PriceConfigDao {
     @Query("SELECT * FROM price_config WHERE synced = 0")
     suspend fun getUnsynced(): List<PriceConfig>
 
+    @Query("DELETE FROM price_config WHERE synced = 1 AND firestoreId != '' AND firestoreId NOT IN (:cloudIds)")
+    suspend fun deleteRemoteMissing(cloudIds: List<String>)
+
     @Query("UPDATE price_config SET synced = 0")
     suspend fun resetRemoteSyncForLocalServer()
 }

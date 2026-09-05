@@ -11,4 +11,5 @@ class NoopRemoteDataClient : RemoteDataClient {
     override suspend fun add(table: String, data: Map<String, Any?>): String = ""
     override suspend fun update(table: String, docId: String, data: Map<String, Any?>) = Unit
     override suspend fun delete(table: String, docId: String) = Unit
+    override suspend fun uploadImage(bytes: ByteArray): String? = null
 }

@@ -10,4 +10,6 @@ interface RemoteDataClient {
     suspend fun add(table: String, data: Map<String, Any?>): String
     suspend fun update(table: String, docId: String, data: Map<String, Any?>)
     suspend fun delete(table: String, docId: String)
+    /** 上传压缩后照片字节，返回完整 URL；失败或纯本地模式返回 null。 */
+    suspend fun uploadImage(bytes: ByteArray): String?
 }

@@ -2,10 +2,12 @@ package com.example.myproductivityapp.data.repository
 
 import com.example.myproductivityapp.data.dao.DeliveryTaskDao
 import com.example.myproductivityapp.data.model.DeliveryTask
+import com.example.myproductivityapp.data.remote.PhotoUtil
 import com.example.myproductivityapp.data.remote.RemoteDataClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class DeliveryTaskRepository(
     private val dao: DeliveryTaskDao,
@@ -22,22 +24,33 @@ class DeliveryTaskRepository(
         dao.observeCompletedTasksForEmployeeRemote(employeeRemoteId)
 
     suspend fun save(task: DeliveryTask): Long = withContext(Dispatchers.IO) {
+        saveWithResult(task).first
+    }
+
+    /**
+     * 保存并返回 (本地id, 云端是否同步成功)。
+     * 本地必成功；云端失败不抛异常（保留本地 unsynced，后台 flush 补传）。
+     */
+    suspend fun saveWithResult(task: DeliveryTask): Pair<Long, Boolean> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val entity = task.copy(updatedAt = now, synced = false)
         val localId = dao.upsert(entity)
         try {
             val data = toMap(entity)
-            if (entity.firestoreId.isNotBlank()) {
+            val ok = if (entity.firestoreId.isNotBlank()) {
                 client.update(table, entity.firestoreId, data)
                 dao.upsert(entity.copy(id = localId, synced = true))
+                true
             } else {
                 val remoteId = client.add(table, data)
                 dao.upsert(entity.copy(id = localId, firestoreId = remoteId, synced = remoteId.isNotBlank()))
+                remoteId.isNotBlank()
             }
+            localId to ok
         } catch (_: Exception) {
             // 保留本地 unsynced，后续 flush 再补传。
+            localId to false
         }
-        localId
     }
 
     suspend fun update(task: DeliveryTask) = withContext(Dispatchers.IO) {
@@ -45,10 +58,18 @@ class DeliveryTaskRepository(
     }
 
     suspend fun delete(task: DeliveryTask) = withContext(Dispatchers.IO) {
+        deleteWithResult(task)
+    }
+
+    /** 删除并返回云端是否同步成功。firestoreId 为空（纯本地）视为成功。 */
+    suspend fun deleteWithResult(task: DeliveryTask): Boolean = withContext(Dispatchers.IO) {
         dao.deleteTask(task)
         try {
-            if (task.firestoreId.isNotBlank()) client.delete(table, task.firestoreId)
-        } catch (_: Exception) { }
+            if (task.firestoreId.isNotBlank()) {
+                client.delete(table, task.firestoreId)
+            }
+            true
+        } catch (_: Exception) { false }
     }
 
     suspend fun syncFromCloud() = withContext(Dispatchers.IO) {
@@ -87,14 +108,33 @@ class DeliveryTaskRepository(
                     completedAt = (obj["completedAt"] as? Number)?.toLong(),
                     firestoreId = remoteId,
                     updatedAt = remoteUpdatedAt,
-                    synced = true
+                    synced = true,
+                    bottleStatus = obj.string("bottleStatus"),
+                    imagePath = obj.string("imagePath"),
+                    remoteImages = obj.string("remoteImages")
                 )
             )
         }
+        // 删除对账：本地已同步但云端已不存在的记录 → 本地删除（他机删除同步过来）
+        val cloudIds = docs.mapNotNull { (it["id"] ?: it["_id"]).toString().takeIf { id -> id.isNotBlank() } }
+        dao.deleteRemoteMissing(cloudIds.ifEmpty { listOf("__none__") })
     }
 
     suspend fun pushUnsynced() = withContext(Dispatchers.IO) {
         dao.getUnsynced().forEach { save(it) }
+    }
+
+    /** 本机照片补传：有本地照片、尚未传服务器的待办 → 压缩上传 → 写 remoteImages 并标未同步。 */
+    suspend fun pushLocalPhotos() = withContext(Dispatchers.IO) {
+        for (task in dao.getPhotoPending()) {
+            try {
+                val bytes = PhotoUtil.compressToJpeg(File(task.imagePath)) ?: continue
+                val url = client.uploadImage(bytes) ?: continue
+                if (url != task.remoteImages) {
+                    dao.update(task.copy(remoteImages = url, synced = false))
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     private fun toMap(t: DeliveryTask) = mapOf<String, Any?>(
@@ -120,7 +160,10 @@ class DeliveryTaskRepository(
         "createdByName" to t.createdByName,
         "createdAt" to t.createdAt,
         "completedAt" to t.completedAt,
-        "updatedAt" to t.updatedAt
+        "updatedAt" to t.updatedAt,
+        "bottleStatus" to t.bottleStatus,
+        "imagePath" to t.imagePath,
+        "remoteImages" to t.remoteImages
     )
 
     private fun Map<String, Any?>.string(key: String, fallback: String = "") =
