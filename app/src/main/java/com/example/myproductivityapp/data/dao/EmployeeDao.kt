@@ -9,6 +9,9 @@ interface EmployeeDao {
     @Query("SELECT * FROM employees ORDER BY name ASC")
     fun getAllEmployees(): Flow<List<Employee>>
 
+    @Query("SELECT * FROM employees ORDER BY name ASC")
+    suspend fun getAllEmployeesOnce(): List<Employee>
+
     @Query("SELECT * FROM employees WHERE id = :id")
     suspend fun getEmployeeById(id: Long): Employee?
 
@@ -24,9 +27,18 @@ interface EmployeeDao {
     @Query("SELECT * FROM employees WHERE employeeId = :employeeId")
     suspend fun getEmployeeByEmployeeId(employeeId: String): Employee?
 
+    @Query("SELECT * FROM employees WHERE phoneNumber = :phone LIMIT 1")
+    suspend fun getEmployeeByPhone(phone: String): Employee?
+
     @Query("SELECT * FROM employees WHERE firestoreId = :firestoreId LIMIT 1")
     suspend fun getByFirestoreId(firestoreId: String): Employee?
 
     @Query("SELECT * FROM employees WHERE synced = 0")
     suspend fun getUnsynced(): List<Employee>
+
+    @Query("DELETE FROM employees WHERE synced = 1 AND firestoreId != '' AND firestoreId NOT IN (:cloudIds)")
+    suspend fun deleteRemoteMissing(cloudIds: List<String>)
+
+    @Query("UPDATE employees SET synced = 0")
+    suspend fun resetRemoteSyncForLocalServer()
 }

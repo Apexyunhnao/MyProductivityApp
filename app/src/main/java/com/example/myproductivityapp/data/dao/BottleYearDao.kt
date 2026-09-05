@@ -23,4 +23,10 @@ interface BottleYearDao {
 
     @Query("SELECT * FROM bottle_years WHERE synced = 0")
     suspend fun getUnsynced(): List<BottleYear>
+
+    @Query("DELETE FROM bottle_years WHERE synced = 1 AND firestoreId != '' AND firestoreId NOT IN (:cloudIds)")
+    suspend fun deleteRemoteMissing(cloudIds: List<String>)
+
+    @Query("UPDATE bottle_years SET synced = 0")
+    suspend fun resetRemoteSyncForLocalServer()
 }

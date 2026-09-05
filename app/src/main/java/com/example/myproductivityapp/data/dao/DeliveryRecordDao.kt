@@ -39,9 +39,18 @@ interface DeliveryRecordDao {
     @Query("SELECT * FROM delivery_records WHERE synced = 0")
     suspend fun getUnsynced(): List<DeliveryRecord>
 
+    @Query("DELETE FROM delivery_records WHERE synced = 1 AND firestoreId != '' AND firestoreId NOT IN (:cloudIds)")
+    suspend fun deleteRemoteMissing(cloudIds: List<String>)
+
+    @Query("SELECT * FROM delivery_records WHERE remoteImages = '' AND (imagePath != '' OR imageUrl != '') ORDER BY date DESC")
+    suspend fun getPhotoPending(): List<DeliveryRecord>
+
     @Query("SELECT * FROM delivery_records WHERE exchangeStatus = :status ORDER BY date DESC")
     fun getExchangeRecordsByStatus(status: String): Flow<List<DeliveryRecord>>
 
     @Query("SELECT * FROM delivery_records WHERE exchangeStatus = :status ORDER BY date DESC")
     suspend fun getExchangeRecordsByStatusOnce(status: String): List<DeliveryRecord>
+
+    @Query("UPDATE delivery_records SET synced = 0")
+    suspend fun resetRemoteSyncForLocalServer()
 }

@@ -12,10 +12,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.model.BottleType
+import com.example.myproductivityapp.data.model.BottleTypes
 import com.example.myproductivityapp.data.model.BottleYear
 import com.example.myproductivityapp.data.model.Employee
 import com.example.myproductivityapp.data.model.PriceConfig
@@ -24,7 +27,22 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(isAdmin: Boolean = true) {
+    // 权限加固：送气工即使被路由误放进来也看不到任何管理内容。
+    // 营业员/站长 isAdmin=true，不受影响。
+    if (!isAdmin) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("没有权限", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text("只有营业员/站长可以管理员工、价格和年份。", style = MaterialTheme.typography.bodyLarge)
+        }
+        return
+    }
+
     val context = LocalContext.current
     val database = remember { AppDatabase.getDatabase(context) }
     val viewModel: EmployeeViewModel = viewModel()
@@ -45,6 +63,8 @@ fun SettingsScreen() {
     var employeeToDelete by remember { mutableStateOf<Employee?>(null) }
     var editingPriceType by remember { mutableStateOf<String?>(null) }
     var showPriceDialog by remember { mutableStateOf(false) }
+    var showAddTypeDialog by remember { mutableStateOf(false) }
+    var deletingPrice by remember { mutableStateOf<PriceConfig?>(null) }
     var showYearDialog by remember { mutableStateOf(false) }
     var initialized by remember { mutableStateOf(false) }
 
@@ -60,11 +80,13 @@ fun SettingsScreen() {
         }
     }
 
+    // 首次启动：给内置 5 种瓶型补默认价格记录（只补一次；之后用户删掉的内置类型不会被自动加回来）
     LaunchedEffect(Unit) {
+        val prefs = context.applicationContext.getSharedPreferences("price_init", 0)
+        if (prefs.getBoolean("seeded", false)) return@LaunchedEffect
         scope.launch {
             BottleType.values().forEach { type ->
-                val existing = priceConfigRepo.getByType(type.name)
-                if (existing == null) {
+                if (priceConfigRepo.getByType(type.name) == null) {
                     priceConfigRepo.save(
                         PriceConfig(
                             bottleType = type.name,
@@ -74,6 +96,7 @@ fun SettingsScreen() {
                     )
                 }
             }
+            prefs.edit().putBoolean("seeded", true).apply()
         }
     }
 
@@ -173,42 +196,60 @@ fun SettingsScreen() {
                 }
             }
             1 -> {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer
-                            )
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    text = "提示",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "设置各类型煤气罐的默认价格，添加配送记录时会自动填充该价格。",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
+                // 排序：内置 5 种按固定顺序在前，自定义类型在后
+                val sortedPrices = remember(priceConfigs) {
+                    priceConfigs.sortedBy { cfg ->
+                        val idx = BottleType.values().indexOfFirst { it.name == cfg.bottleType }
+                        if (idx >= 0) idx else 1000
                     }
-                    items(priceConfigs) { config ->
-                        PriceCard(
-                            priceConfig = config,
-                            onEdit = {
-                                editingPriceType = config.bottleType
-                                showPriceDialog = true
+                }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = "提示",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "设置各类型煤气罐的默认价格，添加配送记录时会自动填充该价格。右下角 + 可以添加自定义瓶型（如中瓶）。",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
                             }
-                        )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        items(sortedPrices) { config ->
+                            PriceCard(
+                                priceConfig = config,
+                                onEdit = {
+                                    editingPriceType = config.bottleType
+                                    showPriceDialog = true
+                                },
+                                onDelete = { deletingPrice = config }
+                            )
+                        }
+                    }
+                    FloatingActionButton(
+                        onClick = { showAddTypeDialog = true },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "添加瓶型")
                     }
                 }
             }
@@ -325,11 +366,16 @@ fun SettingsScreen() {
             },
             onConfirm = { newPrice ->
                 scope.launch {
+                    // 必须带上现有 firestoreId，否则 REPLACE 会把远端 ID 清空、
+                    // 保存走 add() 在服务器新增重复记录，下次同步又拉回旧价格（修改无效的根因）
+                    val current = priceConfigs.find { it.bottleType == editingPriceType }
                     priceConfigRepo.save(
                         PriceConfig(
                             bottleType = editingPriceType!!,
                             price = newPrice,
-                            lastUpdated = System.currentTimeMillis()
+                            lastUpdated = System.currentTimeMillis(),
+                            firestoreId = current?.firestoreId ?: "",
+                            updatedAt = System.currentTimeMillis()
                         )
                     )
                     showPriceDialog = false
@@ -349,6 +395,50 @@ fun SettingsScreen() {
                         showYearDialog = false
                     }
                 }
+            }
+        )
+    }
+
+    if (showAddTypeDialog) {
+        AddBottleTypeDialog(
+            existingTypes = priceConfigs.map { BottleTypes.displayName(it.bottleType) },
+            onDismiss = { showAddTypeDialog = false },
+            onConfirm = { name, price ->
+                scope.launch {
+                    priceConfigRepo.save(
+                        PriceConfig(
+                            bottleType = name,
+                            price = price,
+                            lastUpdated = System.currentTimeMillis()
+                        )
+                    )
+                    showAddTypeDialog = false
+                }
+            }
+        )
+    }
+
+    deletingPrice?.let { price ->
+        AlertDialog(
+            onDismissRequest = { deletingPrice = null },
+            title = { Text("删除瓶型") },
+            text = {
+                Text("确定删除「${price.bottleType}」吗？历史记录不会丢，只是以后记账不能再选这个类型。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            priceConfigRepo.delete(price)
+                            deletingPrice = null
+                        }
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingPrice = null }) { Text("取消") }
             }
         )
     }
@@ -455,7 +545,8 @@ fun AddEmployeeDialog(
 @Composable
 fun PriceCard(
     priceConfig: PriceConfig,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
     val bottleType = BottleType.values().find { it.name == priceConfig.bottleType }
     val displayName = bottleType?.displayName ?: priceConfig.bottleType
@@ -487,8 +578,73 @@ fun PriceCard(
             Button(onClick = onEdit) {
                 Text("修改")
             }
+            if (onDelete != null) {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除类型",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+fun AddBottleTypeDialog(
+    existingTypes: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (String, Int) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var priceText by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加瓶型") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("类型名（例如：中瓶）") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text("价格（元/瓶）") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                if (error != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(error!!, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val cleanName = name.trim()
+                    val price = priceText.toIntOrNull()
+                    when {
+                        cleanName.isBlank() -> error = "类型名不能为空"
+                        cleanName in existingTypes -> error = "这个类型已经存在"
+                        price == null || price < 0 -> error = "价格要填数字"
+                        else -> onConfirm(cleanName, price)
+                    }
+                }
+            ) { Text("确认") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable
@@ -498,7 +654,8 @@ fun EditPriceDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit
 ) {
-    var price by remember { mutableStateOf(currentPrice.toString()) }
+    // remember 必须以 currentPrice/bottleType 为 key：否则 dialog 复用时残留上次输入值（表现为编辑值变 0/旧值）
+    var price by remember(bottleType, currentPrice) { mutableStateOf(currentPrice.toString()) }
     val type = BottleType.values().find { it.name == bottleType }
     val displayName = type?.displayName ?: bottleType
 

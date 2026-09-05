@@ -1,16 +1,15 @@
 package com.example.myproductivityapp.data.repository
 
-import com.example.myproductivityapp.data.cloudbase.CloudBaseClient
 import com.example.myproductivityapp.data.dao.EmployeeDao
 import com.example.myproductivityapp.data.model.Employee
+import com.example.myproductivityapp.data.remote.RemoteDataClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 class EmployeeRepository(
     private val dao: EmployeeDao,
-    private val client: CloudBaseClient
+    private val client: RemoteDataClient
 ) {
     private val table = "employees"
 
@@ -23,15 +22,17 @@ class EmployeeRepository(
 
         try {
             val data = mapOf<String, Any?>(
+                "employeeId" to entity.employeeId,
                 "name" to entity.name,
                 "phoneNumber" to entity.phoneNumber,
                 "updatedAt" to now
             )
             if (entity.firestoreId.isNotBlank()) {
                 client.update(table, entity.firestoreId, data)
+                dao.insertEmployee(entity.copy(id = localId, synced = true))
             } else {
-                val fsId = client.add(table, data)
-                dao.insertEmployee(entity.copy(id = localId, firestoreId = fsId, synced = true))
+                val remoteId = client.add(table, data)
+                dao.insertEmployee(entity.copy(id = localId, firestoreId = remoteId, synced = remoteId.isNotBlank()))
             }
         } catch (_: Exception) { }
         localId
@@ -47,22 +48,25 @@ class EmployeeRepository(
     suspend fun syncFromCloud() = withContext(Dispatchers.IO) {
         val docs = client.list(table)
         for (obj in docs) {
-            val fsId = (obj["id"] ?: obj["_id"] ?: "").toString()
-            if (fsId.isBlank()) continue
-            val existing = dao.getByFirestoreId(fsId)
+            val remoteId = (obj["id"] ?: obj["_id"] ?: "").toString()
+            if (remoteId.isBlank()) continue
+            val existing = dao.getByFirestoreId(remoteId)
             val remoteUpdatedAt = (obj["updatedAt"] as? Number)?.toLong() ?: 0
             if (existing != null && existing.updatedAt >= remoteUpdatedAt) continue
 
             dao.insertEmployee(Employee(
                 id = existing?.id ?: 0,
-                employeeId = existing?.employeeId ?: "",
+                employeeId = (obj["employeeId"] as? String) ?: existing?.employeeId.orEmpty(),
                 name = (obj["name"] as? String) ?: "",
                 phoneNumber = (obj["phoneNumber"] as? String) ?: "",
-                firestoreId = fsId,
+                firestoreId = remoteId,
                 updatedAt = remoteUpdatedAt,
                 synced = true
             ))
         }
+        // 删除对账：本地已同步但云端已不存在的记录 → 本地删除（他机删除同步过来）
+        val cloudIds = docs.mapNotNull { (it["id"] ?: it["_id"]).toString().takeIf { id -> id.isNotBlank() } }
+        dao.deleteRemoteMissing(cloudIds.ifEmpty { listOf("__none__") })
     }
 
     suspend fun pushUnsynced() {

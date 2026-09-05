@@ -20,3 +20,6 @@ build/
 gradle-app.setting
 !gradle-wrapper.jar
 .gradletasknamecache
+server/.venv/
+server/__pycache__/
+server/data/

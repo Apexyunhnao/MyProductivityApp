@@ -39,6 +39,7 @@ import com.example.myproductivityapp.data.AppDatabase
 import com.example.myproductivityapp.data.model.BottleType
 import com.example.myproductivityapp.data.model.DeliveryRecord
 import com.example.myproductivityapp.data.model.Employee
+import com.example.myproductivityapp.data.remote.PhotoUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -486,11 +487,16 @@ fun RecordCard(record: DeliveryRecord, onEdit: () -> Unit, onDelete: () -> Unit,
                 }
             }
 
-            // Display image if exists (Firebase Storage URL first, then local file)
-            val hasImage = record.imageUrl.isNotBlank() || (record.imagePath.isNotBlank() && File(record.imagePath).exists())
+            // Display image if exists（优先服务器压缩图 URL，其次本机文件）
+            val remoteUrl0 = PhotoUtil.remoteUrlList(record.remoteImages).firstOrNull()
+            val hasImage = remoteUrl0 != null ||
+                record.imageUrl.isNotBlank() ||
+                (record.imagePath.isNotBlank() && File(record.imagePath).exists())
             if (hasImage) {
                 val imageData: Any? = when {
-                    record.imageUrl.isNotBlank() -> record.imageUrl
+                    remoteUrl0 != null -> remoteUrl0
+                    record.imageUrl.startsWith("http") -> record.imageUrl
+                    record.imageUrl.isNotBlank() && File(record.imageUrl).exists() -> File(record.imageUrl)
                     record.imagePath.isNotBlank() && File(record.imagePath).exists() -> File(record.imagePath)
                     else -> null
                 }
@@ -586,7 +592,8 @@ fun RecordCard(record: DeliveryRecord, onEdit: () -> Unit, onDelete: () -> Unit,
         }
         }
 
-        if (showImageDialog && (record.imageUrl.isNotBlank() || record.imagePath.isNotBlank())) {
+        val dialogRemoteUrl = PhotoUtil.remoteUrlList(record.remoteImages).firstOrNull()
+        if (showImageDialog && (dialogRemoteUrl != null || record.imageUrl.isNotBlank() || record.imagePath.isNotBlank())) {
         Dialog(
             onDismissRequest = { showImageDialog = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -600,7 +607,9 @@ fun RecordCard(record: DeliveryRecord, onEdit: () -> Unit, onDelete: () -> Unit,
                     .clickable { showImageDialog = false }
             ) {
                 val imageData: Any? = when {
-                    record.imageUrl.isNotBlank() -> record.imageUrl
+                    dialogRemoteUrl != null -> dialogRemoteUrl
+                    record.imageUrl.startsWith("http") -> record.imageUrl
+                    record.imageUrl.isNotBlank() && File(record.imageUrl).exists() -> File(record.imageUrl)
                     record.imagePath.isNotBlank() && File(record.imagePath).exists() -> File(record.imagePath)
                     else -> null
                 }
